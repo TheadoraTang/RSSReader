@@ -8,7 +8,7 @@
 | 洪贝贝 |https://github.com/handingna||
 | 唐益  |https://github.com/maeassar||
 | 徐治平 |https://github.com/fwunai||
-| 朱文韬 | https://github.com/GentleCold||
+| 朱文韬 | https://github.com/GentleCold|51285903136|
 | 仲韦萱 |https://github.com/bouboo1||
 | 赖鑫  |https://github.com/specia1weak||
 | 张宥  |https://github.com/sdfhjisd||
@@ -22,7 +22,7 @@
 | 成员4 | Week14        | RSS 订阅同步系统                 | OPML 导入导出功能、Feed Sync 同步机制、更新内容存储进 SQLite、Feed 更新调度机制              | 支持 RSS 自动同步、订阅迁移以及数据自动更新                    |
 | 成员5 | Week15        | 内容处理与阅读优化系统                | HTML 内容清洗模块、Markdown 转换模块、阅读主题与样式系统、文章详情渲染优化                       | 提供干净的阅读内容与更好的阅读体验                           |
 | 成员6 | Week15        | 搜索系统                       | SQLite 全文搜索（API端）、搜索页面 UI                                          | 支持 RSS 文章全文搜索与搜索界面                          |
-| 成员7 | Week16        | AI Summary 后端系统            | Summary Agent 核心开发、LLM Provider 抽象层、OpenAI-Compatible API 接入       | 支持 AI 文章摘要与多模型切换                            |
+| 朱文韬 | Week16        | AI Summary 后端系统            | Summary Agent 核心开发、LLM Provider 抽象层、OpenAI-Compatible API 接入       | 支持 AI 文章摘要与多模型切换                            |
 | 成员8 | Week16        | 本地模型与 AI 摘要前端              | Ollama/vLLM 本地模型支持、AI摘要结果展示页面                                      | 支持本地大模型与 AI 摘要结果展示                          |
 | 成员9 | Week17        | AI Translation 系统          | Translation Agent 开发、多语言支持（i18n）、AI翻译接口实现                          | 支持 AI 翻译功能与多语言阅读界面                          |
 
@@ -202,9 +202,9 @@
 
 | 时间     | 分工内容                     | 负责人 |
 |--------| ------------------------ | --- |
-| Week16 | Summary Agent 核心开发       | 成员7 |
-| Week16 | LLM Provider 抽象层         | 成员7 |
-| Week16 | OpenAI-Compatible API 接入 | 成员7 |
+| Week16 | Summary Agent 核心开发       | 朱文韬 |
+| Week16 | LLM Provider 抽象层         | 朱文韬 |
+| Week16 | OpenAI-Compatible API 接入 | 朱文韬 |
 | Week16 | 本地模型支持（Ollama/vLLM）      | 成员8 |
 | Week16 | AI摘要结果展示页面               | 成员8 |
 
@@ -261,4 +261,3 @@
 | Week18 | Docker部署/或者只要能方便的启动前后端即可 | 成员3         |
 | Week18 | 项目文档整理                   | 成员3         |
 | Week18 | PPT和汇报                   | 所有成员负责自己的板块 |
-
