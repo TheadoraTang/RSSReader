@@ -57,7 +57,7 @@
 * Frontend：Vue3 + Vite
 * Backend：FastAPI
 * Database：SQLite
-* AI：OpenAI-Compatible API + 本地模型
+* AI：OpenAI-Compatible API + 本地模型（API可以使用学校大模型的，本地模型找一个小一点的开源大模型
 
 ## 周历
 | 周历     | 时间                      |
