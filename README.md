@@ -180,8 +180,8 @@
 | Week15 | Markdown 转换模块     | 仲韦萱 |
 | Week15 | 阅读主题与样式系统         | 仲韦萱 |
 | Week15 | 文章详情渲染优化          | 仲韦萱 |
-| Week15 | SQLite 全文搜索（API端） | 成员6 |
-| Week15 | 搜索页面 UI           | 成员6 |
+| Week15 | SQLite 全文搜索（API端） | 唐益  |
+| Week15 | 搜索页面 UI           | 唐益  |
 
 ## 本周交付成果
 
