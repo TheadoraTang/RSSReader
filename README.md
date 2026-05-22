@@ -264,3 +264,29 @@
 | Week18 | Docker部署/或者只要能方便的启动前后端即可 | 赖鑫         |
 | Week18 | 项目文档整理                   | 赖鑫         |
 | Week18 | PPT和汇报                   | 所有成员负责自己的板块 |
+
+## Desktop Packaging
+
+RSSReader can also run as a desktop app on Windows, macOS, and Linux. The desktop app uses Electron for the shell and starts a local FastAPI backend on `127.0.0.1` with a dynamic port.
+
+Development:
+
+```bash
+npm install
+pip install -r backend/requirements.txt
+npm run dev:desktop
+```
+
+Build installers:
+
+```bash
+npm run dist:desktop
+```
+
+The build command creates the Vue production frontend, packages the FastAPI backend with PyInstaller into `backend/dist/RSSReaderBackend/`, and writes Electron installer artifacts to `release/`.
+
+Desktop runtime data is stored in the OS user data directory through `RSSREADER_DB_PATH`:
+
+- Windows: `%APPDATA%/RSSReader/app.db`
+- macOS: `~/Library/Application Support/RSSReader/app.db`
+- Linux: `~/.config/RSSReader/app.db`

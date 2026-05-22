@@ -52,3 +52,12 @@
 
 
 
+
+## 2026-05-22
+
+- Used AI Coding Agent to implement the Electron desktop packaging plan for cross-platform RSSReader delivery.
+- Added an Electron main process and preload bridge, plus root scripts for desktop development and installer builds.
+- Added a FastAPI desktop server entry and PyInstaller build helper so the backend can run as a bundled local executable.
+- Updated SQLite configuration to support `RSSREADER_DB_PATH`, allowing desktop runtime data to live in the OS user data directory.
+- Updated frontend API configuration so the desktop app can inject the local backend URL while browser development keeps the Vite `/api` proxy.
+- Remaining limitations: platform installer signing/notarization is not configured, and macOS/Linux package verification still needs to be run on those systems.
