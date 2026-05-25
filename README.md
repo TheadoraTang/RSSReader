@@ -20,8 +20,8 @@
 | 方蕴仪 | Week13               | RSS Reader 前端阅读系统+笔记功能开发   | 基础阅读页面开发、Feed列表与文章展示UI、笔记功能开发                                      | 用户可以浏览 Feed、阅读文章并记录笔记                       |
 | 赖鑫 | Week14、Week18        | 导出与项目工程化系统                 | 笔记与文章单篇/多篇导出、Markdown/PDF 导出、Bug修复与联调、Docker部署、项目文档整理              | 支持文章导出与项目部署，实现项目最终交付                        |
 | 洪贝贝 | Week14               | RSS 订阅同步系统                 | OPML 导入导出功能、Feed Sync 同步机制、更新内容存储进 SQLite、Feed 更新调度机制              | 支持 RSS 自动同步、订阅迁移以及数据自动更新                    |
-| 仲韦萱 | Week15、Week18        | 内容处理与阅读优化系统                | HTML 内容清洗模块、Markdown 转换模块、阅读主题与样式系统、文章详情渲染优化                       | 提供干净的阅读内容与更好的阅读体验                           |
-| 唐益 | Week13、Week14、Week15 | 导出与工程化系统、跨平台桌面端 Mac 测试、最终交付验证 | 参与 Week13 和 Week14 的 macOS 桌面端功能测试，验证 Electron 打包、后端自动启动、用户数据目录、RSS Feed 添加与同步、应用退出后的后端进程清理；Week18 继续负责导出、工程化和最终交付验证 | 支持文章导出与项目工程化交付，并补充 macOS 端桌面运行兼容性验证 |
+| 仲韦萱 | Week15、Week18        | 内容处理与阅读优化系统，Mac端功能测试       | HTML 内容清洗模块、Markdown 转换模块、阅读主题与样式系统、文章详情渲染优化                       | 提供干净的阅读内容与更好的阅读体验                           |
+| 唐益 | Week13、Week14、Week15 | 搜索系统搭建，Mac端功能测试            | 参与 Week13 和 Week14 的 macOS 桌面端功能测试，验证 Electron 打包、后端自动启动、用户数据目录、RSS Feed 添加与同步、应用退出后的后端进程清理；Week18 继续负责导出、工程化和最终交付验证 | 支持文章导出与项目工程化交付，并补充 macOS 端桌面运行兼容性验证 |
 | 朱文韬 | Week16               | AI Summary 后端系统            | Summary Agent 核心开发、LLM Provider 抽象层、OpenAI-Compatible API 接入       | 支持 AI 文章摘要与多模型切换                            |
 | 徐治平 | Week16               | 本地模型与 AI 摘要前端              | Ollama/vLLM 本地模型支持、AI摘要结果展示页面                                      | 支持本地大模型与 AI 摘要结果展示                          |
 | 张宥  | Week17               | AI Translation 系统          | Translation Agent 开发、多语言支持（i18n）、AI翻译接口实现                          | 支持 AI 翻译功能与多语言阅读界面                          |
