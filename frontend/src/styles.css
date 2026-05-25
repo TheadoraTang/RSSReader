@@ -1,4 +1,5 @@
 :root {
+  --reader-font-size: 16px;
   color: #1f2937;
   background: #f5f7fb;
   font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -12,23 +13,40 @@ body {
   margin: 0;
 }
 
-.app-shell {
-  min-height: 100vh;
+body.theme-dark {
+  color: #d8dee9;
+  background: #10141c;
 }
 
-.nav {
-  width: 220px;
+.app-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+body.theme-dark .app-shell {
+  background: #10141c;
+}
+
+.top-nav {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
   background: #ffffff;
-  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+body.theme-dark .top-nav {
+  background: #171d27;
+  border-bottom-color: #2d3543;
 }
 
 .brand {
-  height: 72px;
+  height: 56px;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 20px;
-  border-bottom: 1px solid #edf0f5;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .brand strong {
@@ -40,13 +58,34 @@ body {
   font-size: 12px;
 }
 
-.nav-menu {
-  border-right: 0;
+body.theme-dark .brand span,
+body.theme-dark .muted {
+  color: #9aa4b2;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.top-actions .el-button {
+  width: 42px;
+  height: 42px;
+  margin-left: 0;
+}
+
+.top-actions .el-button .el-icon {
+  font-size: 22px;
 }
 
 .main {
   padding: 20px;
   background: #f5f7fb;
+}
+
+body.theme-dark .main {
+  background: #10141c;
 }
 
 .page-title {
@@ -69,19 +108,45 @@ body {
   padding: 16px;
 }
 
+body.theme-dark .panel {
+  background: #171d27;
+  border-color: #2d3543;
+}
+
 .muted {
   color: #6b7280;
 }
 
 .reader-grid {
   display: grid;
-  grid-template-columns: 240px minmax(280px, 380px) minmax(420px, 1fr);
+  grid-template-columns: 240px minmax(220px, 280px) minmax(540px, 1fr);
   gap: 16px;
-  height: calc(100vh - 40px);
+  height: calc(100vh - 96px);
 }
 
 .scroll-panel {
   overflow: auto;
+  scrollbar-color: #9aa4b2 transparent;
+}
+
+.scroll-panel::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-panel::-webkit-scrollbar-thumb {
+  background: #9aa4b2;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+.scroll-panel::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .article-item {
@@ -94,13 +159,171 @@ body {
   background: #eef6ff;
 }
 
+body.theme-dark .article-item {
+  border-bottom-color: #2d3543;
+}
+
+body.theme-dark .article-item.active {
+  background: #22314a;
+}
+
+body.theme-dark .scroll-panel,
+body.theme-dark .article-list-panel {
+  scrollbar-color: #4a5568 transparent;
+}
+
+body.theme-dark .scroll-panel::-webkit-scrollbar-track,
+body.theme-dark .article-list-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+body.theme-dark .scroll-panel::-webkit-scrollbar-thumb,
+body.theme-dark .article-list-panel::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+body.theme-dark .scroll-panel::-webkit-scrollbar-corner,
+body.theme-dark .article-list-panel::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .article-item h3 {
   margin: 0 0 6px;
   font-size: 15px;
+  line-height: 1.4;
+}
+
+.article-item .muted {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .article-body {
+  font-size: var(--reader-font-size);
   line-height: 1.75;
+}
+
+.reader-title,
+.reader-section-title {
+  font-size: calc(var(--reader-font-size) + 3px);
+  line-height: 1.45;
+}
+
+.note-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  margin-bottom: 12px;
+}
+
+.note-actions .el-button {
+  margin-left: 0;
+}
+
+.article-source-link,
+.article-body a {
+  color: #2563eb;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.article-source-link:hover,
+.article-body a:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+body.theme-dark .article-body {
+  color: #d8dee9;
+}
+
+body.theme-dark .article-body a,
+body.theme-dark .article-source-link {
+  color: #8ab4f8;
+}
+
+body.theme-dark .article-source-link:hover {
+  color: #a9c7ff;
+}
+
+body.theme-dark .el-button {
+  --el-button-bg-color: #222a36;
+  --el-button-border-color: #3a4556;
+  --el-button-text-color: #d8dee9;
+  --el-button-hover-bg-color: #2c3544;
+  --el-button-hover-border-color: #4a5870;
+  --el-button-hover-text-color: #ffffff;
+  --el-button-active-bg-color: #1f2631;
+  --el-button-active-border-color: #5b6c86;
+  --el-button-disabled-bg-color: #1b212b;
+  --el-button-disabled-border-color: #303948;
+  --el-button-disabled-text-color: #7f8998;
+}
+
+body.theme-dark .el-button--primary {
+  --el-button-bg-color: #2f5f9f;
+  --el-button-border-color: #3f70b5;
+  --el-button-text-color: #ffffff;
+  --el-button-hover-bg-color: #3c72b8;
+  --el-button-hover-border-color: #4f83c8;
+}
+
+body.theme-dark .el-input__wrapper,
+body.theme-dark .el-textarea__inner,
+body.theme-dark .el-input-number .el-input__wrapper {
+  background: #222a36;
+  border-color: #3a4556;
+  box-shadow: 0 0 0 1px #3a4556 inset;
+}
+
+body.theme-dark .el-input__inner,
+body.theme-dark .el-textarea__inner {
+  color: #d8dee9;
+}
+
+body.theme-dark .el-input__inner::placeholder,
+body.theme-dark .el-textarea__inner::placeholder {
+  color: #7f8998;
+}
+
+body.theme-dark .el-form-item__label,
+body.theme-dark .el-slider__runway.show-input + .el-input-number,
+body.theme-dark .el-input-number__decrease,
+body.theme-dark .el-input-number__increase {
+  color: #d8dee9;
+}
+
+body.theme-dark .el-input-number__decrease,
+body.theme-dark .el-input-number__increase {
+  background: #1b212b;
+  border-color: #3a4556;
+}
+
+body.theme-dark .el-slider__runway {
+  background-color: #303948;
+}
+
+body.theme-dark .el-slider__bar {
+  background-color: #5f8fd6;
+}
+
+body.theme-dark .el-slider__button {
+  border-color: #5f8fd6;
+  background: #d8dee9;
+}
+
+body.theme-dark .el-segmented {
+  --el-segmented-bg-color: #222a36;
+  --el-segmented-item-selected-bg-color: #364256;
+  --el-segmented-item-selected-color: #ffffff;
+  --el-segmented-item-hover-bg-color: #2c3544;
+  --el-segmented-item-hover-color: #ffffff;
+  color: #d8dee9;
 }
 
 .toolbar {
@@ -120,10 +343,6 @@ body {
   .reader-grid {
     grid-template-columns: 1fr;
     height: auto;
-  }
-
-  .nav {
-    width: 180px;
   }
 }
 
