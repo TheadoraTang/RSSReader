@@ -14,21 +14,33 @@ body {
 
 .app-shell {
   min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.content-shell {
+  min-height: calc(100vh - 56px);
+}
+
+.top-nav {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .nav {
-  width: 220px;
+  width: 132px;
   background: #ffffff;
   border-right: 1px solid #e5e7eb;
 }
 
 .brand {
-  height: 72px;
+  height: 56px;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 20px;
-  border-bottom: 1px solid #edf0f5;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .brand strong {
@@ -42,6 +54,7 @@ body {
 
 .nav-menu {
   border-right: 0;
+  padding-top: 8px;
 }
 
 .main {
@@ -77,7 +90,7 @@ body {
   display: grid;
   grid-template-columns: 240px minmax(280px, 380px) minmax(420px, 1fr);
   gap: 16px;
-  height: calc(100vh - 40px);
+  height: calc(100vh - 96px);
 }
 
 .scroll-panel {
@@ -123,7 +136,7 @@ body {
   }
 
   .nav {
-    width: 180px;
+    width: 112px;
   }
 }
 
