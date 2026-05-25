@@ -67,7 +67,7 @@
         <el-button :icon="MagicStick" @click="runSummary">生成摘要</el-button>
         <el-button :icon="Switch" @click="runTranslate">翻译</el-button>
       </div>
-      <h1>{{ store.selectedArticle.title }}</h1>
+      <h1 class="reader-title">{{ store.selectedArticle.title }}</h1>
       <p class="muted">
         <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }} · </span>
         <a
@@ -92,21 +92,18 @@
         :closable="false"
       />
       <el-divider />
-      <h2>笔记</h2>
+      <h2 class="reader-section-title">笔记</h2>
       <el-input
         v-model="note"
         type="textarea"
         :rows="6"
         placeholder="写下这篇文章的 Markdown 笔记"
       />
-      <div class="toolbar">
+      <div class="note-actions">
         <el-button type="primary" @click="saveNote">保存笔记</el-button>
-        <el-button
-          tag="a"
-          :href="`/api/export/articles/${store.selectedArticle.id}/markdown`"
-          target="_blank"
-          >导出 Markdown</el-button
-        >
+        <el-button :loading="exportingMarkdown" @click="exportMarkdown">
+          {{ exportingMarkdown ? "正在导出..." : "导出 Markdown" }}
+        </el-button>
       </div>
     </section>
   </div>
@@ -129,6 +126,7 @@ const store = useReaderStore();
 const note = ref("");
 const aiResult = ref("");
 const articleBodyRef = ref<HTMLElement | null>(null);
+const exportingMarkdown = ref(false);
 
 onMounted(async () => {
   await store.loadAll();
@@ -164,6 +162,31 @@ async function saveNote() {
   if (!store.selectedArticle) return;
   await rssApi.saveNote(store.selectedArticle.id, note.value);
   ElMessage.success("笔记已保存到 Mock Repository");
+}
+
+async function exportMarkdown() {
+  if (!store.selectedArticle) return;
+  exportingMarkdown.value = true;
+  try {
+    const blob = await rssApi.exportArticleMarkdown(store.selectedArticle.id);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeFilename(store.selectedArticle.title)}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    ElMessage.success("Markdown 已导出");
+  } catch (error) {
+    ElMessage.error("导出失败，请确认后端已启动");
+  } finally {
+    exportingMarkdown.value = false;
+  }
+}
+
+function safeFilename(name: string) {
+  return name.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80) || "article";
 }
 
 async function runSummary() {

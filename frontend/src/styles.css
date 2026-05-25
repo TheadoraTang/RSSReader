@@ -207,6 +207,24 @@ body.theme-dark .article-list-panel::-webkit-scrollbar-corner {
   line-height: 1.75;
 }
 
+.reader-title,
+.reader-section-title {
+  font-size: calc(var(--reader-font-size) + 3px);
+  line-height: 1.45;
+}
+
+.note-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  margin-bottom: 12px;
+}
+
+.note-actions .el-button {
+  margin-left: 0;
+}
+
 .article-source-link,
 .article-body a {
   color: #2563eb;
