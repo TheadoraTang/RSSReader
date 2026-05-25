@@ -66,7 +66,14 @@ import {
   Reading,
   Setting,
 } from "@element-plus/icons-vue";
+import { onMounted } from "vue";
 import { useRouter } from "vue-router";
+import { usePreferencesStore } from "./stores/preferences";
 
 const router = useRouter();
+const preferences = usePreferencesStore();
+
+onMounted(() => {
+  preferences.applyPreferences();
+});
 </script>
