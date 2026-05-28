@@ -58,9 +58,15 @@ export interface AIResult {
   created_at: string
 }
 
+export interface OperationResult {
+  ok: boolean
+  message: string
+}
+
 export const rssApi = {
   feeds: () => api.get<Feed[]>('/feeds').then((res) => res.data),
   createFeed: (payload: { title?: string; url: string }) => api.post<Feed>('/feeds', payload).then((res) => res.data),
+  deleteFeed: (id: number) => api.delete<OperationResult>(`/feeds/${id}`).then((res) => res.data),
   syncFeed: (id: number) => api.post<Feed>(`/feeds/${id}/sync`).then((res) => res.data),
   syncAll: () => api.post<Feed[]>('/feeds/sync-all').then((res) => res.data),
   articles: (params?: Record<string, unknown>) => api.get<Article[]>('/articles', { params }).then((res) => res.data),
