@@ -46,17 +46,40 @@
       <el-table :data="feeds" stripe>
         <el-table-column prop="title" label="标题" />
         <el-table-column prop="url" label="URL" />
-        <el-table-column prop="last_sync_at" label="最后同步" />
-        <el-table-column label="操作" width="140">
+        <el-table-column label="最后同步" width="180">
+          <template #default="{ row }">
+            {{ formatLastSyncAt(row.last_sync_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180">
           <template #default="{ row }">
             <el-button
               size="small"
               :loading="syncingFeedId === row.id"
-              :disabled="syncingAll || syncingFeedId !== null"
+              :disabled="isBusy"
               @click="syncFeed(row.id)"
             >
               {{ syncingFeedId === row.id ? "正在同步..." : "同步" }}
             </el-button>
+            <el-popconfirm
+              title="确定删除当前订阅吗？"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              confirm-button-type="danger"
+              @confirm="deleteFeed(row.id)"
+            >
+              <template #reference>
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  :loading="deletingFeedId === row.id"
+                  :disabled="isBusy"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -65,9 +88,9 @@
 </template>
 
 <script setup lang="ts">
-import { Download, Refresh, Upload } from "@element-plus/icons-vue";
+import { Delete, Download, Refresh, Upload } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { Feed, rssApi } from "../api/client";
 
 const feeds = ref<Feed[]>([]);
@@ -76,11 +99,42 @@ const url = ref("");
 const addingFeed = ref(false);
 const syncingAll = ref(false);
 const syncingFeedId = ref<number | null>(null);
+const deletingFeedId = ref<number | null>(null);
+const isBusy = computed(
+  () =>
+    syncingAll.value ||
+    syncingFeedId.value !== null ||
+    deletingFeedId.value !== null,
+);
 
 onMounted(loadFeeds);
 
 async function loadFeeds() {
   feeds.value = await rssApi.feeds();
+}
+
+function formatLastSyncAt(value?: string) {
+  if (!value) return "未同步";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const partMap = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+
+  return `${partMap.year}/${partMap.month}/${partMap.day} ${partMap.hour}:${partMap.minute}:${partMap.second}`;
 }
 
 async function addFeed() {
@@ -109,6 +163,19 @@ async function syncFeed(id: number) {
     ElMessage.error("同步失败，请稍后重试");
   } finally {
     syncingFeedId.value = null;
+  }
+}
+
+async function deleteFeed(id: number) {
+  deletingFeedId.value = id;
+  try {
+    await rssApi.deleteFeed(id);
+    await loadFeeds();
+    ElMessage.success("订阅已删除");
+  } catch (error) {
+    ElMessage.error("删除订阅失败，请稍后重试");
+  } finally {
+    deletingFeedId.value = null;
   }
 }
 
