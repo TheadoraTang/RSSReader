@@ -9,6 +9,8 @@ frontend/dist/
 node_modules/
 .npm-cache/
 .electron-cache/
+reference/
+.DS_Store
 
 backend/build/
 backend/dist/

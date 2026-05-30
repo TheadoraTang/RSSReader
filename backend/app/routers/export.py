@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 
-from app.schemas import ExportRequest
+from app.schemas import BatchDigestExportRequest, BatchDigestExportResponse, ExportRequest
 from app.services import export_service
 
 router = APIRouter()
@@ -15,3 +15,10 @@ def export_article(article_id: int):
 def export_articles(payload: ExportRequest):
     return Response(content=export_service.articles_markdown(payload.article_ids), media_type="text/markdown")
 
+
+@router.post("/digests/markdown", response_model=BatchDigestExportResponse)
+def export_batch_digest(payload: BatchDigestExportRequest):
+    try:
+        return export_service.batch_digest_export(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

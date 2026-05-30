@@ -63,6 +63,20 @@ export interface OperationResult {
   message: string
 }
 
+export interface BatchDigestExportRequest {
+  article_ids: number[]
+  include_summary: boolean
+  include_note: boolean
+}
+
+export interface BatchDigestExportResponse {
+  digest_title: string
+  filename: string
+  markdown: string
+  exported_article_ids: number[]
+  skipped_article_ids: number[]
+}
+
 export const rssApi = {
   feeds: () => api.get<Feed[]>('/feeds').then((res) => res.data),
   createFeed: (payload: { title?: string; url: string }) => api.post<Feed>('/feeds', payload).then((res) => res.data),
@@ -79,10 +93,11 @@ export const rssApi = {
   saveNote: (articleId: number, content_markdown: string) => api.put<Note>(`/articles/${articleId}/note`, { content_markdown }).then((res) => res.data),
   exportArticleMarkdown: (articleId: number) =>
     api.get<Blob>(`/export/articles/${articleId}/markdown`, { responseType: 'blob' }).then((res) => res.data),
+  exportBatchDigestMarkdown: (payload: BatchDigestExportRequest) =>
+    api.post<BatchDigestExportResponse>('/export/digests/markdown', payload).then((res) => res.data),
   summary: (articleId: number) => api.post<AIResult>(`/ai/summary/${articleId}`).then((res) => res.data),
   translate: (articleId: number) => api.post<AIResult>(`/ai/translate/${articleId}`).then((res) => res.data),
   suggestTags: (articleId: number) => api.post<AIResult>(`/ai/tag-suggest/${articleId}`).then((res) => res.data),
   llmStats: () => api.get('/stats/llm').then((res) => res.data),
   syncLogs: () => api.get('/logs/sync').then((res) => res.data)
 }
-

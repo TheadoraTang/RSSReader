@@ -1,5 +1,6 @@
-const { app, BrowserWindow, net: electronNet, protocol } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, net: electronNet, protocol } = require('electron')
 const { spawn } = require('child_process')
+const fs = require('fs/promises')
 const http = require('http')
 const nodeNet = require('net')
 const path = require('path')
@@ -9,6 +10,87 @@ const useBuiltFrontend = process.env.RSSREADER_USE_BUILT_FRONTEND === '1'
 const isDev = !app.isPackaged && !useBuiltFrontend
 let backendProcess = null
 let apiBaseUrl = process.env.RSSREADER_BACKEND_URL || ''
+
+function settingsFilePath() {
+  return path.join(app.getPath('userData'), 'desktop-settings.json')
+}
+
+async function readDesktopSettings() {
+  try {
+    const raw = await fs.readFile(settingsFilePath(), 'utf8')
+    return JSON.parse(raw)
+  } catch (error) {
+    return {}
+  }
+}
+
+async function writeDesktopSettings(settings) {
+  await fs.writeFile(settingsFilePath(), JSON.stringify(settings, null, 2), 'utf8')
+}
+
+async function fileExists(targetPath) {
+  try {
+    await fs.access(targetPath)
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
+function ensureMarkdownExtension(targetPath) {
+  return path.extname(targetPath).toLowerCase() === '.md' ? targetPath : `${targetPath}.md`
+}
+
+async function makeUniqueFilePath(targetPath) {
+  const normalizedTargetPath = ensureMarkdownExtension(targetPath)
+  if (!(await fileExists(normalizedTargetPath))) {
+    return normalizedTargetPath
+  }
+
+  const extension = path.extname(normalizedTargetPath)
+  const directory = path.dirname(normalizedTargetPath)
+  const baseName = path.basename(normalizedTargetPath, extension)
+  let suffix = 2
+
+  while (true) {
+    const candidatePath = path.join(directory, `${baseName}-${suffix}${extension}`)
+    if (!(await fileExists(candidatePath))) {
+      return candidatePath
+    }
+    suffix += 1
+  }
+}
+
+function registerDesktopIpcHandlers() {
+  ipcMain.handle('rssreader:save-markdown', async (_event, payload) => {
+    const content = typeof payload?.content === 'string' ? payload.content : ''
+    const suggestedFilename = typeof payload?.suggestedFilename === 'string' && payload.suggestedFilename
+      ? payload.suggestedFilename
+      : 'digest.md'
+    const settings = await readDesktopSettings()
+    const initialDirectory = settings.lastExportDirectory || app.getPath('documents') || app.getPath('home')
+    const defaultPath = await makeUniqueFilePath(path.join(initialDirectory, suggestedFilename))
+    const result = await dialog.showSaveDialog({
+      title: 'Export Markdown',
+      defaultPath,
+      filters: [
+        { name: 'Markdown', extensions: ['md'] }
+      ]
+    })
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true }
+    }
+
+    const finalPath = await makeUniqueFilePath(result.filePath)
+    await fs.writeFile(finalPath, content, 'utf8')
+    await writeDesktopSettings({
+      ...settings,
+      lastExportDirectory: path.dirname(finalPath)
+    })
+    return { canceled: false, filePath: finalPath }
+  })
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -211,6 +293,7 @@ app.whenReady().then(async () => {
   if (!isDev || useBuiltFrontend) {
     registerFrontendProtocol()
   }
+  registerDesktopIpcHandlers()
   await startBackend()
   await createWindow()
 

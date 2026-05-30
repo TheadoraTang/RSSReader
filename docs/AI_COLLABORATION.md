@@ -76,3 +76,12 @@
 - 将订阅列表中的最后同步时间按 UTC+8 展示为 `yyyy/M/d HH:mm:ss` 格式。
 - 在订阅操作栏新增删除按钮，调用现有 `DELETE /api/feeds/{feed_id}` 接口，并在删除前进行二次确认。
 - 当前限制：本次只调整订阅管理页展示和删除交互，未扩展订阅删除后的阅读页状态联动测试。
+
+## 2026-05-30
+
+- 使用 AI Coding Agent 设计并实现批量 digest 导出功能，参考 `reference/batch-export-reference.md` 和 `reference/mercury-main` 的多篇导出流程。
+- 在 `update_docs/Week13_codex_batch_export_plan.md` 中先写明任务目标、范围、接口方案和跨平台保存策略，再据此推进实现。
+- 后端新增 `POST /api/export/digests/markdown`，统一生成批量 digest Markdown，支持可选 AI 摘要、可选笔记、按当前列表顺序导出，以及跳过缺少标题或链接的文章。
+- 前端阅读页新增批量导出模式、文章多选、Digest 预览弹窗、复制和导出动作；Web 端使用浏览器下载，Electron 端调用原生保存对话框。
+- Electron 新增保存 Markdown 的 IPC 能力，并在桌面端记忆上一次成功保存的导出目录。
+- 当前限制：本次未实现 digest 模板自定义、固定导出目录设置页和桌面端自动化测试；Electron 导出目录记忆目前仅记录最近一次成功保存的目录。

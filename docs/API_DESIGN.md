@@ -37,6 +37,39 @@
 - `PUT /api/articles/{id}/note`
 - `GET /api/export/articles/{id}/markdown`
 - `POST /api/export/articles/markdown`
+- `POST /api/export/digests/markdown`
+
+### `POST /api/export/digests/markdown`
+
+批量生成 digest Markdown 预览内容，供 Web 下载或 Electron 保存对话框使用。
+
+请求体示例：
+
+```json
+{
+  "article_ids": [12, 8, 3],
+  "include_summary": true,
+  "include_note": true
+}
+```
+
+响应体示例：
+
+```json
+{
+  "digest_title": "Digest 26-05-30",
+  "filename": "2026-05-30-digest.md",
+  "markdown": "+++\ndate = '2026-05-30T21:30:00+08:00'\n...",
+  "exported_article_ids": [12, 8],
+  "skipped_article_ids": [3]
+}
+```
+
+行为说明：
+
+- 导出顺序以 `article_ids` 提供的顺序为准
+- `include_summary=true` 时，仅取最新一条 AI 摘要结果
+- 缺少标题或链接的文章会被跳过，并写入 `skipped_article_ids`
 
 ## AI
 
@@ -48,4 +81,3 @@
 
 - `GET /api/stats/llm`
 - `GET /api/logs/sync`
-
