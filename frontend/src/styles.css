@@ -207,10 +207,14 @@ body.theme-dark .article-list-panel::-webkit-scrollbar-corner {
   line-height: 1.75;
 }
 
-.reader-title,
+.reader-title {
+  font-size: clamp(24px, calc(var(--reader-font-size) + 10px), 34px);
+  line-height: 1.35;
+}
+
 .reader-section-title {
-  font-size: calc(var(--reader-font-size) + 3px);
-  line-height: 1.45;
+  font-size: clamp(18px, calc(var(--reader-font-size) + 4px), 24px);
+  line-height: 1.4;
 }
 
 .note-actions {
@@ -345,4 +349,3 @@ body.theme-dark .el-segmented {
     height: auto;
   }
 }
-

@@ -94,6 +94,21 @@
         <el-button :icon="Switch" :disabled="multiExportMode" @click="runTranslate">
           翻译
         </el-button>
+        <el-dropdown
+          :disabled="multiExportMode"
+          trigger="click"
+          @command="handleExportCommand"
+        >
+          <el-button :loading="exportingMarkdown">
+            导出
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="digest">导出文摘</el-dropdown-item>
+              <el-dropdown-item command="full">导出全文</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
       <h1 class="reader-title">{{ store.selectedArticle.title }}</h1>
       <p class="muted">
@@ -126,19 +141,16 @@
       />
       <div class="note-actions">
         <el-button type="primary" :disabled="multiExportMode" @click="saveNote">保存笔记</el-button>
-        <el-button :disabled="multiExportMode" :loading="exportingMarkdown" @click="exportMarkdown">
-          {{ exportingMarkdown ? "正在导出..." : "导出 Markdown" }}
-        </el-button>
       </div>
     </section>
   </div>
 
-  <el-dialog v-model="batchDigestDialogVisible" title="批量导出文摘" width="720px">
+  <el-dialog v-model="batchDigestDialogVisible" :title="exportDialogTitle" width="720px">
     <div class="digest-dialog">
       <div class="digest-meta-grid">
         <div>
-          <div class="digest-meta-label">选中文章</div>
-          <div>{{ selectedBatchCount }}</div>
+          <div class="digest-meta-label">{{ exportDialogCountLabel }}</div>
+          <div>{{ exportDialogArticleCount }}</div>
         </div>
         <div>
           <div class="digest-meta-label">Digest 标题</div>
@@ -178,7 +190,7 @@
 
     <template #footer>
       <div class="dialog-footer">
-        <el-button @click="batchDigestDialogVisible = false">关闭</el-button>
+        <el-button @click="resetExportDialogState">关闭</el-button>
         <el-button :disabled="!batchDigestPreview?.markdown" @click="copyBatchDigest">
           复制
         </el-button>
@@ -216,6 +228,7 @@ const includeBatchNote = ref(false);
 const batchDigestLoading = ref(false);
 const batchDigestExporting = ref(false);
 const batchDigestPreview = ref<BatchDigestExportResponse | null>(null);
+const exportDialogMode = ref<"single" | "batch" | null>(null);
 const isDesktop = Boolean(window.rssReaderDesktop?.saveMarkdown);
 
 const orderedSelectedBatchIds = computed(() => {
@@ -224,6 +237,22 @@ const orderedSelectedBatchIds = computed(() => {
 });
 
 const selectedBatchCount = computed(() => orderedSelectedBatchIds.value.length);
+const exportDialogArticleIds = computed(() => {
+  if (exportDialogMode.value === "single") {
+    return store.selectedArticle ? [store.selectedArticle.id] : [];
+  }
+  if (exportDialogMode.value === "batch") {
+    return orderedSelectedBatchIds.value;
+  }
+  return [];
+});
+const exportDialogArticleCount = computed(() => exportDialogArticleIds.value.length);
+const exportDialogTitle = computed(() =>
+  exportDialogMode.value === "single" ? "导出文摘" : "批量导出文摘",
+);
+const exportDialogCountLabel = computed(() =>
+  exportDialogMode.value === "single" ? "当前文章" : "选中文章",
+);
 const batchSummaryUnavailable = computed(
   () => {
     const preview = batchDigestPreview.value;
@@ -314,10 +343,7 @@ function beginMultiExportMode() {
 function exitMultiExportMode() {
   multiExportMode.value = false;
   selectedBatchArticleIds.value = [];
-  batchDigestDialogVisible.value = false;
-  includeBatchSummary.value = false;
-  includeBatchNote.value = false;
-  batchDigestPreview.value = null;
+  resetExportDialogState();
 }
 
 function handleArticleClick(articleId: number) {
@@ -345,17 +371,43 @@ function openBatchExportDialog() {
     ElMessage.warning("请先选择至少一篇文章");
     return;
   }
+  exportDialogMode.value = "batch";
+  includeBatchSummary.value = false;
+  includeBatchNote.value = false;
+  batchDigestPreview.value = null;
   batchDigestDialogVisible.value = true;
 }
 
+function openSingleExportDialog() {
+  if (!store.selectedArticle) {
+    ElMessage.warning("请先选择一篇文章");
+    return;
+  }
+  exportDialogMode.value = "single";
+  includeBatchSummary.value = false;
+  includeBatchNote.value = false;
+  batchDigestPreview.value = null;
+  batchDigestDialogVisible.value = true;
+}
+
+function handleExportCommand(command: string) {
+  if (command === "digest") {
+    openSingleExportDialog();
+    return;
+  }
+  if (command === "full") {
+    void exportMarkdown();
+  }
+}
+
 async function refreshBatchDigestPreview() {
-  if (!batchDigestDialogVisible.value || !orderedSelectedBatchIds.value.length) {
+  if (!batchDigestDialogVisible.value || !exportDialogArticleIds.value.length) {
     return;
   }
   batchDigestLoading.value = true;
   try {
     batchDigestPreview.value = await rssApi.exportBatchDigestMarkdown({
-      article_ids: orderedSelectedBatchIds.value,
+      article_ids: exportDialogArticleIds.value,
       include_summary: includeBatchSummary.value,
       include_note: includeBatchNote.value,
     });
@@ -398,12 +450,24 @@ async function exportBatchDigest() {
       ElMessage.success("Markdown 已导出");
     }
 
-    exitMultiExportMode();
+    if (exportDialogMode.value === "batch") {
+      exitMultiExportMode();
+    } else {
+      resetExportDialogState();
+    }
   } catch (error) {
     ElMessage.error("批量导出失败");
   } finally {
     batchDigestExporting.value = false;
   }
+}
+
+function resetExportDialogState() {
+  batchDigestDialogVisible.value = false;
+  includeBatchSummary.value = false;
+  includeBatchNote.value = false;
+  batchDigestPreview.value = null;
+  exportDialogMode.value = null;
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {
