@@ -60,8 +60,8 @@
         }"
         @click="handleArticleClick(article.id)"
       >
-        <div class="article-row">
-          <div class="article-leading">
+        <div class="article-row" :class="{ 'selection-active': multiExportMode }">
+          <div class="article-leading" :class="{ 'selection-active': multiExportMode }">
             <el-checkbox
               v-if="multiExportMode"
               :model-value="isArticleBatchSelected(article.id)"
@@ -451,6 +451,7 @@ async function syncAll() {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 32px;
   margin-bottom: 12px;
 }
 
@@ -464,7 +465,7 @@ async function syncAll() {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   width: 100%;
-  min-height: 40px;
+  min-height: 32px;
 }
 
 .selection-toolbar-side {
@@ -486,8 +487,8 @@ async function syncAll() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 12px;
   border-radius: 999px;
   background: var(--el-fill-color);
   color: var(--el-text-color-primary);
@@ -499,6 +500,11 @@ async function syncAll() {
 .article-row {
   display: flex;
   align-items: flex-start;
+  gap: 0;
+  transition: gap 0.18s ease;
+}
+
+.article-row.selection-active {
   gap: 12px;
 }
 
@@ -506,9 +512,21 @@ async function syncAll() {
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding-top: 2px;
+  transition:
+    width 0.18s ease,
+    min-width 0.18s ease,
+    opacity 0.12s ease;
+}
+
+.article-leading.selection-active {
   width: 22px;
   min-width: 22px;
-  padding-top: 2px;
+  opacity: 1;
 }
 
 .article-meta {
