@@ -6,8 +6,12 @@ const THEME_KEY = 'rssreader.readerTheme'
 export type ReaderTheme = 'light' | 'dark'
 
 function storedFontSize() {
-  const value = Number(localStorage.getItem(FONT_SIZE_KEY))
-  return Number.isFinite(value) ? value : 16
+  const raw = localStorage.getItem(FONT_SIZE_KEY)
+  if (raw === null) {
+    return 16
+  }
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? value : 16
 }
 
 function storedTheme(): ReaderTheme {

@@ -1,6 +1,8 @@
 from app.schemas.rss import (
     AIResultRead,
     ArticleRead,
+    BatchDigestExportRequest,
+    BatchDigestExportResponse,
     ExportRequest,
     FeedCreate,
     FeedRead,
@@ -19,6 +21,8 @@ from app.schemas.rss import (
 __all__ = [
     "AIResultRead",
     "ArticleRead",
+    "BatchDigestExportRequest",
+    "BatchDigestExportResponse",
     "ExportRequest",
     "FeedCreate",
     "FeedRead",
@@ -33,4 +37,3 @@ __all__ = [
     "TagRead",
     "TagUpdate",
 ]
-

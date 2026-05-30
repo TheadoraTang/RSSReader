@@ -227,6 +227,33 @@ class SQLiteRepository:
             "created_at": row["created_at"],
         }
 
+    def get_latest_ai_result(self, article_id, result_type):
+        self.get_article(article_id)
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM ai_results
+                WHERE entry_id = ? AND task_type = ?
+                ORDER BY datetime(created_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (article_id, result_type),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "article_id": row["entry_id"],
+            "type": row["task_type"],
+            "provider_id": None,
+            "prompt": row["prompt"],
+            "result": row["result"],
+            "input_tokens": row["input_tokens"],
+            "output_tokens": row["output_tokens"],
+            "created_at": row["created_at"],
+        }
+
     def stats(self):
         with get_connection() as conn:
             article_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]

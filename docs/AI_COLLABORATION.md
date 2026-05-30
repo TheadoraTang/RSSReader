@@ -1,6 +1,7 @@
 # AI 协作记录
 
 ## 2026-05-18
+
 本项目开发过程中使用 Coding Agent 辅助完成需求拆解、架构规划和代码骨架生成。
 
 ## 协作内容
@@ -50,9 +51,6 @@
 - 补充 Agent 协作记录要求：后续与 AI Agent 协作后，需要在本文件追加带日期的协作内容、产出和限制。
 - 修正 `Plan.md` 中过期的当前功能和数据库接入说明，使其与现有 SQLite Repository、`schema.sql`、`app.db` 和 README 功能规划保持一致。
 
-
-
-
 ## 2026-05-22
 
 - Used AI Coding Agent to implement the Electron desktop packaging plan for cross-platform RSSReader delivery.
@@ -76,3 +74,15 @@
 - 将订阅列表中的最后同步时间按 UTC+8 展示为 `yyyy/M/d HH:mm:ss` 格式。
 - 在订阅操作栏新增删除按钮，调用现有 `DELETE /api/feeds/{feed_id}` 接口，并在删除前进行二次确认。
 - 当前限制：本次只调整订阅管理页展示和删除交互，未扩展订阅删除后的阅读页状态联动测试。
+
+## 2026-05-30
+
+- 使用 AI Coding Agent 设计并实现批量 digest 导出功能，目标是对齐 Mercury 风格的多篇导出流程，并适配当前 RSSReader 的 Web/Electron 架构。
+- 在 `update_docs/Week14_batch_export_plan.md` 中先写明任务目标、范围、接口方案和跨平台保存策略，再据此推进实现。
+- 后端新增 `POST /api/export/digests/markdown`，统一生成批量 digest Markdown，支持可选 AI 摘要、可选笔记、按当前列表顺序导出，以及跳过缺少标题或链接的文章。
+- 前端阅读页新增批量导出模式、文章多选、Digest 预览弹窗、复制和导出动作；Web 端使用浏览器下载，Electron 端调用原生保存对话框。
+- Electron 新增保存 Markdown 的 IPC 能力，并在桌面端记忆上一次成功保存的导出目录。
+- 当前限制：本次未实现 digest 模板自定义、固定导出目录设置页和桌面端自动化测试；Electron 导出目录记忆目前仅记录最近一次成功保存的目录。
+- 后续优化建议：继续收敛批量导出 UI，必要时把 `ReaderView.vue` 中的批量选择工具条和导出弹窗拆为独立组件，并补充桌面端手测记录与批量导出测试用例。
+- 后续迭代中又补充了单篇导出入口的语义区分：将当前文章顶部工具栏中的导出入口整理为 `导出文摘 / 导出全文` 下拉，避免把全文导出与 digest 导出混在一起。
+- 同时修复了桌面端首次运行时阅读字号默认值可能被错误初始化为 `0px` 的问题，并重新调整了阅读页标题与小节标题的字号层级，改善 Electron 客户端的可读性。
