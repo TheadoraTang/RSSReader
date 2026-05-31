@@ -44,7 +44,7 @@
         <template v-else>
           <div class="toolbar-actions">
             <el-button :icon="Refresh" @click="syncAll">同步全部</el-button>
-            <el-button @click="beginMultiExportMode">文摘批量导出</el-button>
+            <el-button :icon="Files" @click="beginMultiExportMode">文摘批量导出</el-button>
           </div>
         </template>
       </div>
@@ -95,17 +95,22 @@
           翻译
         </el-button>
         <el-dropdown
+          class="export-dropdown"
           :disabled="multiExportMode"
           trigger="click"
           @command="handleExportCommand"
         >
-          <el-button :loading="exportingMarkdown">
-            导出
+          <el-button class="export-trigger" type="primary" :loading="exportingMarkdown">
+            <span class="export-trigger-label">
+              <el-icon><Download /></el-icon>
+              <span>导出</span>
+            </span>
+            <el-icon class="export-trigger-arrow"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="digest">导出文摘</el-dropdown-item>
-              <el-dropdown-item command="full">导出全文</el-dropdown-item>
+              <el-dropdown-item command="full">导出 Markdown</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -141,6 +146,9 @@
       />
       <div class="note-actions">
         <el-button type="primary" :disabled="multiExportMode" @click="saveNote">保存笔记</el-button>
+        <el-button :loading="exportingMarkdown" :disabled="multiExportMode" @click="exportMarkdown">
+          {{ exportingMarkdown ? "正在导出..." : "导出 Markdown" }}
+        </el-button>
       </div>
     </section>
   </div>
@@ -208,7 +216,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check, MagicStick, Refresh, Star, Switch } from "@element-plus/icons-vue";
+import { ArrowDown, Check, Download, Files, MagicStick, Refresh, Star, Switch } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import type { BatchDigestExportResponse } from "../api/client";
@@ -519,9 +527,36 @@ async function syncAll() {
   margin-bottom: 12px;
 }
 
+.toolbar :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
 .toolbar-actions {
   display: flex;
-  gap: 8px;
+  gap: 16px;
+  flex-wrap: nowrap;
+}
+
+.toolbar-actions :deep(.el-button) {
+  white-space: nowrap;
+}
+
+.export-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.export-trigger-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.export-trigger-arrow {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-left: 1px;
 }
 
 .selection-toolbar {
