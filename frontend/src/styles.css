@@ -119,7 +119,7 @@ body.theme-dark .panel {
 
 .reader-grid {
   display: grid;
-  grid-template-columns: 240px minmax(220px, 280px) minmax(540px, 1fr);
+  grid-template-columns: 200px minmax(300px, 300px) minmax(600px, 1fr);
   gap: 16px;
   height: calc(100vh - 96px);
 }
