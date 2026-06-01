@@ -63,6 +63,39 @@ export interface OperationResult {
   message: string
 }
 
+export interface FeedSyncItem {
+  feed_id?: number
+  url?: string
+  title?: string
+  status: 'success' | 'failed' | 'skipped'
+  message: string
+  feed?: Feed
+}
+
+export interface FeedSyncReport {
+  total: number
+  success: number
+  failed: number
+  skipped: number
+  results: FeedSyncItem[]
+}
+
+export interface OPMLImportItem {
+  url: string
+  title?: string
+  status: 'imported' | 'skipped' | 'failed'
+  message: string
+  feed?: Feed
+}
+
+export interface OPMLImportReport {
+  total: number
+  imported: number
+  skipped: number
+  failed: number
+  results: OPMLImportItem[]
+}
+
 export interface BatchDigestExportRequest {
   article_ids: number[]
   include_summary: boolean
@@ -83,7 +116,13 @@ export const rssApi = {
   createFeed: (payload: { title?: string; url: string }) => api.post<Feed>('/feeds', payload).then((res) => res.data),
   deleteFeed: (id: number) => api.delete<OperationResult>(`/feeds/${id}`).then((res) => res.data),
   syncFeed: (id: number) => api.post<Feed>(`/feeds/${id}/sync`).then((res) => res.data),
-  syncAll: () => api.post<Feed[]>('/feeds/sync-all').then((res) => res.data),
+  syncAll: () => api.post<FeedSyncReport>('/feeds/sync-all').then((res) => res.data),
+  importOpml: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<OPMLImportReport>('/opml/import', formData).then((res) => res.data)
+  },
+  exportOpml: () => api.get<Blob>('/opml/export', { responseType: 'blob' }).then((res) => res.data),
   articles: (params?: Record<string, unknown>) => api.get<Article[]>('/articles', { params }).then((res) => res.data),
   article: (id: number) => api.get<Article>(`/articles/${id}`).then((res) => res.data),
   markRead: (id: number, is_read: boolean) => api.patch<Article>(`/articles/${id}/read`, null, { params: { is_read } }).then((res) => res.data),

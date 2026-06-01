@@ -66,14 +66,72 @@ import {
   Reading,
   Setting,
 } from "@element-plus/icons-vue";
-import { onMounted } from "vue";
+import { onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
+import { rssApi } from "./api/client";
 import { usePreferencesStore } from "./stores/preferences";
 
 const router = useRouter();
 const preferences = usePreferencesStore();
+let timedSyncTimer: number | undefined;
+let backgroundSyncRunning = false;
 
 onMounted(() => {
   preferences.applyPreferences();
+  triggerStartupSync();
+  configureTimedSync();
 });
+
+onUnmounted(() => {
+  clearTimedSync();
+});
+
+watch(
+  () => [preferences.timedSyncEnabled, preferences.timedSyncIntervalMinutes] as const,
+  configureTimedSync,
+);
+
+function triggerStartupSync() {
+  if (!preferences.startupSyncEnabled || !preferences.shouldRunStartupSync()) {
+    return;
+  }
+  preferences.recordStartupSync();
+  void runBackgroundSync("startup");
+}
+
+function configureTimedSync() {
+  clearTimedSync();
+  if (!preferences.timedSyncEnabled) {
+    return;
+  }
+  timedSyncTimer = window.setInterval(
+    () => void runBackgroundSync("timer"),
+    preferences.timedSyncIntervalMinutes * 60 * 1000,
+  );
+}
+
+function clearTimedSync() {
+  if (timedSyncTimer !== undefined) {
+    window.clearInterval(timedSyncTimer);
+    timedSyncTimer = undefined;
+  }
+}
+
+async function runBackgroundSync(reason: "startup" | "timer") {
+  if (backgroundSyncRunning) {
+    return;
+  }
+  backgroundSyncRunning = true;
+  try {
+    const report = await rssApi.syncAll();
+    window.dispatchEvent(new CustomEvent("rssreader:background-sync", { detail: report }));
+    if (report.failed > 0) {
+      console.warn(`Background ${reason} sync finished with ${report.failed} failed feed(s).`, report);
+    }
+  } catch (error) {
+    console.warn(`Background ${reason} sync failed.`, error);
+  } finally {
+    backgroundSyncRunning = false;
+  }
+}
 </script>

@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 import sqlite3
 
 from app.database import get_connection, initialize_database
-from app.services.feed_parser import parse_feed
 
 
 def now() -> str:
@@ -28,7 +27,7 @@ class SQLiteRepository:
     def create_feed(self, payload):
         url = str(payload.url)
         try:
-            parsed = parse_feed(url)
+            parsed = self._parse_feed(url)
         except Exception as exc:
             self._log(None, url, "failed", str(exc))
             raise ValueError(str(exc)) from exc
@@ -92,7 +91,7 @@ class SQLiteRepository:
         url = feed["url"]
         timestamp = now()
         try:
-            parsed = parse_feed(url)
+            parsed = self._parse_feed(url)
             inserted = self._save_entries_for_feed(feed_id, parsed["entries"])
             with get_connection() as conn:
                 conn.execute(
@@ -181,6 +180,9 @@ class SQLiteRepository:
             }
             for row in rows
         ]
+
+    def log_feed_event(self, feed_id: int | None, url: str, status: str, message: str) -> None:
+        self._log(feed_id, url, status, message)
 
     def get_note(self, article_id):
         self.get_article(article_id)
@@ -423,6 +425,11 @@ class SQLiteRepository:
                 "INSERT INTO feed_fetch_logs (feed_id, url, status, message, fetched_at) VALUES (?, ?, ?, ?, ?)",
                 (feed_id, url, status, message, now()),
             )
+
+    def _parse_feed(self, url: str) -> dict:
+        from app.services.feed_parser import parse_feed
+
+        return parse_feed(url)
 
     def _feed(self, row):
         return {

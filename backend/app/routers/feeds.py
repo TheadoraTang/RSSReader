@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas import ArticleRead, FeedCreate, FeedRead, FeedUpdate, OperationResult
+from app.schemas import ArticleRead, FeedCreate, FeedRead, FeedSyncReport, FeedUpdate, OperationResult
 from app.services import article_service
 from app.services import feed_service
 
@@ -20,7 +20,7 @@ def create_feed(payload: FeedCreate):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/sync-all", response_model=list[FeedRead])
+@router.post("/sync-all", response_model=FeedSyncReport)
 def sync_all_feeds():
     return feed_service.sync_all_feeds()
 
