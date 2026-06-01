@@ -110,7 +110,7 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="digest">导出文摘</el-dropdown-item>
-              <el-dropdown-item command="full">导出 Markdown</el-dropdown-item>
+              <el-dropdown-item command="full">导出笔记</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -147,7 +147,7 @@
       <div class="note-actions">
         <el-button type="primary" :disabled="multiExportMode" @click="saveNote">保存笔记</el-button>
         <el-button :loading="exportingMarkdown" :disabled="multiExportMode" @click="exportMarkdown">
-          {{ exportingMarkdown ? "正在导出..." : "导出 Markdown" }}
+          {{ exportingMarkdown ? "正在导出..." : "导出笔记" }}
         </el-button>
       </div>
     </section>
