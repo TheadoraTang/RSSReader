@@ -5,7 +5,7 @@
 |-----| ---------- |-------------|
 | 唐小卉 |https://github.com/TheadoraTang | 51285903071 |
 | 方蕴仪 |https://github.com/gloriaaa0312 | 51275903070 |
-| 洪贝贝 |https://github.com/handingna|             |
+| 洪贝贝 |https://github.com/handingna|51285903034|
 | 唐益  |https://github.com/maeassar|             |
 | 徐治平 |https://github.com/fwunai| 51285903022 |
 | 仲韦萱 |https://github.com/bouboo1| 51285903052 |

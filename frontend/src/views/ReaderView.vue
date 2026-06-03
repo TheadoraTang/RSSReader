@@ -218,7 +218,7 @@
 <script setup lang="ts">
 import { ArrowDown, Check, Download, Files, MagicStick, Refresh, Star, Switch } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { BatchDigestExportResponse } from "../api/client";
 import { rssApi } from "../api/client";
 import { useReaderStore } from "../stores/reader";
@@ -282,8 +282,13 @@ const batchSummaryHelperText = computed(() => {
 });
 
 onMounted(async () => {
+  window.addEventListener("rssreader:background-sync", handleBackgroundSync);
   await store.loadAll();
   await loadNote();
+});
+
+onUnmounted(() => {
+  window.removeEventListener("rssreader:background-sync", handleBackgroundSync);
 });
 
 watch(() => store.selectedArticle?.id, loadNote);
@@ -300,6 +305,11 @@ async function loadArticles(params?: Record<string, unknown>) {
   exitMultiExportMode();
   store.articles = await rssApi.articles(params);
   store.selectedArticle = store.articles[0] ?? null;
+}
+
+async function handleBackgroundSync() {
+  await store.loadAll();
+  await loadNote();
 }
 
 async function loadNote() {
@@ -507,8 +517,17 @@ async function runTranslate() {
 
 async function syncAll() {
   exitMultiExportMode();
-  await rssApi.syncAll();
-  ElMessage.success("Mock 同步已触发");
+  const report = await rssApi.syncAll();
+  await store.loadAll();
+  if (report.total === 0) {
+    ElMessage.warning("当前没有可同步的订阅");
+  } else if (report.failed > 0 && report.success === 0) {
+    ElMessage.error(`同步失败：${report.failed} 个订阅失败`);
+  } else if (report.failed > 0) {
+    ElMessage.warning(`同步完成：${report.success} 个成功，${report.failed} 个失败`);
+  } else {
+    ElMessage.success(`全部订阅同步完成：${report.success} 个成功`);
+  }
 }
 </script>
 

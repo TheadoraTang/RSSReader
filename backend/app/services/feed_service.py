@@ -26,5 +26,40 @@ def sync_feed(feed_id):
 
 
 def sync_all_feeds():
-    return [repository.sync_feed(feed["id"]) for feed in repository.list_feeds()]
+    results = []
+    for feed in repository.list_feeds():
+        feed_id = feed["id"]
+        try:
+            synced_feed = repository.sync_feed(feed_id)
+        except Exception as exc:
+            results.append(
+                {
+                    "feed_id": feed_id,
+                    "url": feed.get("url"),
+                    "title": feed.get("title"),
+                    "status": "failed",
+                    "message": str(exc),
+                    "feed": None,
+                }
+            )
+            continue
+
+        results.append(
+            {
+                "feed_id": synced_feed["id"],
+                "url": synced_feed["url"],
+                "title": synced_feed["title"],
+                "status": "success",
+                "message": "Feed synced successfully.",
+                "feed": synced_feed,
+            }
+        )
+
+    return {
+        "total": len(results),
+        "success": sum(1 for item in results if item["status"] == "success"),
+        "failed": sum(1 for item in results if item["status"] == "failed"),
+        "skipped": sum(1 for item in results if item["status"] == "skipped"),
+        "results": results,
+    }
 

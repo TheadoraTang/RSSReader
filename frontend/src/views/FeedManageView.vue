@@ -11,12 +11,22 @@
         >
           {{ syncingAll ? "正在同步..." : "同步全部" }}
         </el-button>
-        <el-button :icon="Upload">OPML 导入</el-button>
+        <el-upload
+          class="opml-upload"
+          :show-file-list="false"
+          accept=".opml,.xml"
+          :http-request="importOpml"
+          :disabled="isBusy"
+        >
+          <el-button :icon="Upload" :loading="importingOpml" :disabled="isBusy">
+            OPML 导入
+          </el-button>
+        </el-upload>
         <el-button
-          tag="a"
-          href="/api/opml/export"
-          target="_blank"
+          :loading="exportingOpml"
+          :disabled="isBusy"
           :icon="Download"
+          @click="exportOpml"
           >OPML 导出</el-button
         >
       </div>
@@ -88,8 +98,9 @@
 </template>
 
 <script setup lang="ts">
-import { Delete, Download, Refresh, Upload } from "@element-plus/icons-vue";
+import { Download, Refresh, Upload } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
+import type { UploadRequestOptions } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 import { Feed, rssApi } from "../api/client";
 
@@ -100,11 +111,15 @@ const addingFeed = ref(false);
 const syncingAll = ref(false);
 const syncingFeedId = ref<number | null>(null);
 const deletingFeedId = ref<number | null>(null);
+const importingOpml = ref(false);
+const exportingOpml = ref(false);
 const isBusy = computed(
   () =>
     syncingAll.value ||
     syncingFeedId.value !== null ||
-    deletingFeedId.value !== null,
+    deletingFeedId.value !== null ||
+    importingOpml.value ||
+    exportingOpml.value,
 );
 
 onMounted(loadFeeds);
@@ -182,19 +197,82 @@ async function deleteFeed(id: number) {
 async function syncAll() {
   syncingAll.value = true;
   try {
-    await rssApi.syncAll();
+    const report = await rssApi.syncAll();
     await loadFeeds();
-    ElMessage.success("全部订阅同步完成");
+    showSyncReportMessage(report);
   } catch (error) {
     ElMessage.error("同步全部失败，请稍后重试");
   } finally {
     syncingAll.value = false;
   }
 }
+
+async function importOpml(options: UploadRequestOptions) {
+  importingOpml.value = true;
+  try {
+    const report = await rssApi.importOpml(options.file as File);
+    await loadFeeds();
+    if (report.failed > 0 && report.imported === 0) {
+      ElMessage.error(`OPML 导入失败 ${report.failed} 个，跳过 ${report.skipped} 个`);
+    } else if (report.failed > 0 || report.skipped > 0) {
+      ElMessage.warning(`OPML 导入完成：新增 ${report.imported} 个，跳过 ${report.skipped} 个，失败 ${report.failed} 个`);
+    } else {
+      ElMessage.success(`OPML 导入完成：新增 ${report.imported} 个订阅`);
+    }
+  } catch (error) {
+    ElMessage.error("OPML 导入失败，请检查文件格式或订阅源地址");
+  } finally {
+    importingOpml.value = false;
+  }
+}
+
+async function exportOpml() {
+  exportingOpml.value = true;
+  try {
+    const blob = await rssApi.exportOpml();
+    triggerBrowserDownload(blob, "rssreader-subscriptions.opml");
+    ElMessage.success("OPML 已导出");
+  } catch (error) {
+    ElMessage.error("OPML 导出失败，请确认后端已启动");
+  } finally {
+    exportingOpml.value = false;
+  }
+}
+
+function showSyncReportMessage(report: { total: number; success: number; failed: number; skipped: number }) {
+  if (report.total === 0) {
+    ElMessage.warning("当前没有可同步的订阅");
+    return;
+  }
+  if (report.failed > 0 && report.success === 0) {
+    ElMessage.error(`同步失败：${report.failed} 个订阅失败`);
+    return;
+  }
+  if (report.failed > 0) {
+    ElMessage.warning(`同步完成：${report.success} 个成功，${report.failed} 个失败`);
+    return;
+  }
+  ElMessage.success(`全部订阅同步完成：${report.success} 个成功`);
+}
+
+function triggerBrowserDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 </script>
 
 <style scoped>
 .url-input {
   width: 360px;
+}
+
+.opml-upload {
+  display: inline-flex;
 }
 </style>

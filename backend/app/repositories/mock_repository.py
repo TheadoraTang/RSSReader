@@ -203,6 +203,9 @@ class MockRepository:
     def list_logs(self):
         return deepcopy(self.sync_logs)
 
+    def log_feed_event(self, feed_id, url, status, message):
+        self.sync_logs.append({"id": self._next_id(self.sync_logs), "feed_id": feed_id, "status": status, "message": message, "created_at": now()})
+
     def stats(self):
         total_input = sum(item["input_tokens"] for item in self.ai_results) or 1024
         total_output = sum(item["output_tokens"] for item in self.ai_results) or 512
