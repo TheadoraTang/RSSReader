@@ -71,3 +71,36 @@ CREATE TABLE IF NOT EXISTS ai_results (
 CREATE INDEX IF NOT EXISTS idx_entries_feed_id ON entries(feed_id);
 CREATE INDEX IF NOT EXISTS idx_entries_published_at ON entries(published_at);
 CREATE INDEX IF NOT EXISTS idx_logs_feed_id ON feed_fetch_logs(feed_id);
+
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
+-- FTS5 virtual table for full-text search over entries
+CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+    title,
+    summary,
+    cleaned_markdown,
+    content='entries',
+    content_rowid='id',
+    tokenize='unicode61'
+);
+
+-- Keep FTS index in sync with entries table
+CREATE TRIGGER IF NOT EXISTS entries_fts_insert AFTER INSERT ON entries BEGIN
+    INSERT INTO entries_fts(rowid, title, summary, cleaned_markdown)
+    VALUES (new.id, new.title, new.summary, new.cleaned_markdown);
+END;
+
+CREATE TRIGGER IF NOT EXISTS entries_fts_delete AFTER DELETE ON entries BEGIN
+    INSERT INTO entries_fts(entries_fts, rowid, title, summary, cleaned_markdown)
+    VALUES ('delete', old.id, old.title, old.summary, old.cleaned_markdown);
+END;
+
+CREATE TRIGGER IF NOT EXISTS entries_fts_update AFTER UPDATE ON entries BEGIN
+    INSERT INTO entries_fts(entries_fts, rowid, title, summary, cleaned_markdown)
+    VALUES ('delete', old.id, old.title, old.summary, old.cleaned_markdown);
+    INSERT INTO entries_fts(rowid, title, summary, cleaned_markdown)
+    VALUES (new.id, new.title, new.summary, new.cleaned_markdown);
+END;

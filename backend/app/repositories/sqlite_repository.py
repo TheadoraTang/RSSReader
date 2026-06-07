@@ -126,6 +126,30 @@ class SQLiteRepository:
     def sync_all_feeds(self):
         return [self.sync_feed(feed["id"]) for feed in self.list_feeds()]
 
+    def search_articles(self, query: str, limit: int = 50) -> list[dict]:
+        query = query.strip()
+        if not query:
+            return []
+        # Build a prefix-match query: each token gets a trailing * so "LLM" matches "LLMs", "LLM-based", etc.
+        tokens = query.replace('"', '').split()
+        fts_query = " ".join(f'"{t}"*' for t in tokens if t)
+        sql = """
+            SELECT entries.*, feeds.title AS feed_title,
+                   snippet(entries_fts, 0, '<mark>', '</mark>', '...', 24) AS title_snippet,
+                   snippet(entries_fts, 1, '<mark>', '</mark>', '...', 48) AS summary_snippet,
+                   snippet(entries_fts, 2, '<mark>', '</mark>', '...', 48) AS content_snippet,
+                   rank
+            FROM entries_fts
+            JOIN entries ON entries.id = entries_fts.rowid
+            JOIN feeds ON feeds.id = entries.feed_id
+            WHERE entries_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+        """
+        with get_connection() as conn:
+            rows = conn.execute(sql, (fts_query, limit)).fetchall()
+        return [self._search_result(row) for row in rows]
+
     def list_articles(self, feed_id=None, tag_id=None, unread=None, starred=None):
         query = """
             SELECT entries.*, feeds.title AS feed_title
@@ -501,6 +525,22 @@ class SQLiteRepository:
             "is_starred": bool(row["is_starred"]),
             "tag_ids": [],
             "created_at": row["created_at"],
+        }
+
+    def _search_result(self, row):
+        return {
+            "id": row["id"],
+            "feed_id": row["feed_id"],
+            "feed_title": row["feed_title"],
+            "title": row["title"],
+            "url": row["link"] or "",
+            "author": row["author"],
+            "published_at": row["published_at"],
+            "is_read": bool(row["is_read"]),
+            "is_starred": bool(row["is_starred"]),
+            "title_snippet": row["title_snippet"],
+            "summary_snippet": row["summary_snippet"],
+            "content_snippet": row["content_snippet"],
         }
 
 

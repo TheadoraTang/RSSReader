@@ -25,6 +25,13 @@ def initialize_database() -> None:
     with get_connection() as conn:
         conn.executescript(schema)
         _migrate_entries_table(conn)
+        _migrate_fts_table(conn)
+    # Vector table requires the sqlite-vec extension, initialized separately
+    try:
+        from app.services.rag_service import initialize_vec_table
+        initialize_vec_table()
+    except Exception:
+        pass  # sqlite-vec not available or not configured — skip silently
 
 
 def get_db():
@@ -42,4 +49,17 @@ def _migrate_entries_table(conn: sqlite3.Connection) -> None:
     for column, statement in migrations.items():
         if column not in columns:
             conn.execute(statement)
+
+
+def _migrate_fts_table(conn: sqlite3.Connection) -> None:
+    # Backfill FTS index for any existing rows that were inserted before the triggers existed.
+    # entries_fts uses content= so we check if it's empty while entries has rows.
+    fts_count = conn.execute("SELECT COUNT(*) FROM entries_fts").fetchone()[0]
+    if fts_count == 0:
+        entries_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        if entries_count > 0:
+            conn.execute(
+                "INSERT INTO entries_fts(rowid, title, summary, cleaned_markdown) "
+                "SELECT id, title, summary, cleaned_markdown FROM entries"
+            )
 
