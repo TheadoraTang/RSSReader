@@ -386,6 +386,11 @@ const homeSyncResults = computed(() => lastHomeSyncReport.value?.results ?? [])
 onMounted(async () => {
   window.addEventListener('rssreader:background-sync', handleBackgroundSync)
   await store.loadAll()
+  const articleId = route.query.article
+  if (articleId) {
+    await store.selectArticle(Number(articleId))
+    void router.replace({ path: '/', query: { ...route.query, article: undefined } })
+  }
   await loadNote()
   ensureVisibleSelection()
 })

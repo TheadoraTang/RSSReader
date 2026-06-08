@@ -165,3 +165,18 @@ class BatchDigestExportResponse(BaseModel):
     summary_available_count: int = 0
     exported_article_ids: list[int] = Field(default_factory=list)
     skipped_article_ids: list[int] = Field(default_factory=list)
+
+
+class SearchResultRead(BaseModel):
+    id: int
+    feed_id: int
+    feed_title: str
+    title: str
+    url: str
+    author: str | None = None
+    published_at: datetime | None = None
+    is_read: bool = False
+    is_starred: bool = False
+    title_snippet: str | None = None
+    summary_snippet: str | None = None
+    content_snippet: str | None = None

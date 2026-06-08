@@ -23,6 +23,24 @@
             @click="openSubscriptionPanel"
           />
         </el-tooltip>
+        <el-tooltip content="搜索" placement="bottom">
+          <el-button
+            :icon="Search"
+            text
+            circle
+            aria-label="搜索"
+            @click="router.push('/search')"
+          />
+        </el-tooltip>
+        <el-tooltip content="AI 问答" placement="bottom">
+          <el-button
+            :icon="ChatDotRound"
+            text
+            circle
+            aria-label="AI 问答"
+            @click="router.push('/ask')"
+          />
+        </el-tooltip>
         <el-tooltip content="统计日志" placement="bottom">
           <el-button
             :icon="DataAnalysis"
@@ -53,7 +71,11 @@
       </div>
     </el-header>
     <el-main class="main">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <keep-alive include="AskView,SearchView">
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </el-main>
     <el-drawer
       v-model="settingsDrawerOpen"
@@ -70,10 +92,12 @@
 
 <script setup lang="ts">
 import {
+  ChatDotRound,
   Connection,
   DataAnalysis,
   MagicStick,
   Reading,
+  Search,
   Setting,
 } from "@element-plus/icons-vue";
 import { onMounted, onUnmounted, ref, watch } from "vue";

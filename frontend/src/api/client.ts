@@ -63,6 +63,44 @@ export interface OperationResult {
   message: string
 }
 
+export interface SearchResult {
+  id: number
+  feed_id: number
+  feed_title: string
+  title: string
+  url: string
+  author?: string
+  published_at?: string
+  is_read: boolean
+  is_starred: boolean
+  title_snippet?: string
+  summary_snippet?: string
+  content_snippet?: string
+}
+
+export interface RagConfig {
+  siliconflow_api_key: string
+  siliconflow_base_url: string
+  embedding_model: string
+  deepseek_api_key: string
+  deepseek_base_url: string
+  deepseek_model: string
+}
+
+export interface AskSource {
+  id: number
+  title: string
+  url: string
+  feed_title: string
+  published_at?: string
+  snippet?: string
+}
+
+export interface AskResponse {
+  answer: string
+  sources: AskSource[]
+}
+
 export interface FeedSyncItem {
   feed_id?: number
   url?: string
@@ -164,5 +202,18 @@ export const rssApi = {
   translate: (articleId: number) => api.post<AIResult>(`/ai/translate/${articleId}`).then((res) => res.data),
   suggestTags: (articleId: number) => api.post<AIResult>(`/ai/tag-suggest/${articleId}`).then((res) => res.data),
   llmStats: () => api.get('/stats/llm').then((res) => res.data),
-  syncLogs: () => api.get<SyncLog[]>('/logs/sync').then((res) => res.data)
+  syncLogs: () => api.get<SyncLog[]>('/logs/sync').then((res) => res.data),
+  search: (q: string, limit = 50) =>
+    api.get<SearchResult[]>('/search', { params: { q, limit } }).then((res) => res.data),
+  ragAsk: (question: string) =>
+    api.post<AskResponse>('/rag/ask', { question }, { timeout: 60000 }).then((res) => res.data),
+  ragIndex: () =>
+    api.post<{ status: string; message: string }>('/rag/index').then((res) => res.data),
+  ragIndexStatus: () =>
+    api.get<{ running: boolean; last_indexed: number }>('/rag/index/status').then((res) => res.data),
+  getRagConfig: () =>
+    api.get<RagConfig>('/rag/config').then((res) => res.data),
+  saveRagConfig: (config: RagConfig) =>
+    api.put<RagConfig>('/rag/config', config).then((res) => res.data)
+  
 }

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import DB_PATH, initialize_database
-from app.routers import ai, articles, export, feeds, logs, notes, opml, stats, tags
+from app.routers import ai, articles, export, feeds, logs, notes, opml, rag, search, stats, tags
 
 app = FastAPI(
     title="RSSReader API",
@@ -18,6 +18,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(search.router, prefix="/api/search", tags=["search"])
+app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 app.include_router(feeds.router, prefix="/api/feeds", tags=["feeds"])
 app.include_router(articles.router, prefix="/api/articles", tags=["articles"])
 app.include_router(opml.router, prefix="/api/opml", tags=["opml"])
