@@ -5,7 +5,7 @@ from app.database import get_connection
 
 router = APIRouter()
 
-_index_status = {"running": False, "last_indexed": 0}
+_index_status = {"running": False, "last_indexed": 0, "error": ""}
 
 
 class AskRequest(BaseModel):
@@ -78,15 +78,33 @@ def ask(body: AskRequest):
         result = rag_ask(body.question)
         return result
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        msg = str(exc)
+        if "connection" in msg.lower() or "connect" in msg.lower():
+            detail = "无法连接到 AI 服务，请检查 Base URL 是否正确"
+        elif "401" in msg or "authentication" in msg.lower() or "api key" in msg.lower():
+            detail = "API Key 无效或已过期，请在 AI 设置中重新配置"
+        elif "model" in msg.lower() and "not found" in msg.lower():
+            detail = "模型不存在，请检查 AI 设置中的模型名称"
+        else:
+            detail = f"AI 服务调用失败：{msg}"
+        raise HTTPException(status_code=500, detail=detail) from exc
 
 
 def _run_index():
     _index_status["running"] = True
+    _index_status["error"] = ""
     try:
         from app.services.rag_service import index_all_entries
         count = index_all_entries()
         _index_status["last_indexed"] = count
+    except Exception as exc:
+        msg = str(exc)
+        if "connection" in msg.lower() or "connect" in msg.lower():
+            _index_status["error"] = "无法连接到 Embedding 服务，请检查 Base URL 是否正确"
+        elif "401" in msg or "authentication" in msg.lower() or "api key" in msg.lower():
+            _index_status["error"] = "Embedding API Key 无效，请在 AI 设置中重新配置"
+        else:
+            _index_status["error"] = f"索引失败：{msg}"
     finally:
         _index_status["running"] = False
 
@@ -104,4 +122,5 @@ def index_status():
     return {
         "running": _index_status["running"],
         "last_indexed": _index_status["last_indexed"],
+        "error": _index_status["error"],
     }

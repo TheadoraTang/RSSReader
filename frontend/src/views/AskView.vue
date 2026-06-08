@@ -67,6 +67,7 @@
 <script setup lang="ts">
 import { ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { getErrorMessage } from '../api/client'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { rssApi, type AskResponse } from '../api/client'
@@ -89,8 +90,7 @@ async function doAsk() {
   try {
     result.value = await rssApi.ragAsk(q)
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : '请求失败，请检查 API Key 配置'
-    error.value = msg
+    error.value = getErrorMessage(e)
   } finally {
     loading.value = false
   }
@@ -112,7 +112,11 @@ async function doIndex() {
         if (!status.running) {
           clearInterval(poll)
           indexing.value = false
-          ElMessage.success(`索引完成，本次新增 ${status.last_indexed} 篇文章`)
+          if (status.error) {
+            ElMessage.error(status.error)
+          } else {
+            ElMessage.success(`索引完成，本次新增 ${status.last_indexed} 篇文章`)
+          }
         }
       } catch {
         clearInterval(poll)
@@ -120,8 +124,7 @@ async function doIndex() {
       }
     }, 2000)
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : '索引失败，请检查 SILICONFLOW_API_KEY 配置'
-    ElMessage.error(msg)
+    ElMessage.error(getErrorMessage(e))
     indexing.value = false
   }
 }
