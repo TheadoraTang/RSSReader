@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="ai-settings-page">
     <div class="page-title">
       <h1>AI 设置</h1>
     </div>
@@ -23,35 +23,42 @@
         <el-form-item>
           <el-switch v-model="provider.enabled" active-text="启用" />
         </el-form-item>
-        <el-button type="primary" @click="saveProvider">保存配置</el-button>
+        <el-form-item>
+          <el-button type="primary" @click="saveProvider">保存配置</el-button>
+        </el-form-item>
       </el-form>
     </section>
 
     <section class="panel rag-panel">
       <h2 class="section-title">RAG 问答配置</h2>
-      <el-alert title="配置向量检索（Embedding）和对话生成（Chat）所用的 API，保存后立即生效。" type="info" :closable="false" style="margin-bottom: 16px" />
+      <el-alert
+        title="配置向量检索（Embedding）和对话生成（Chat）所用的 API，支持任意 OpenAI 兼容接口，保存后立即生效。"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 20px"
+      />
 
-      <el-form label-width="140px" class="settings-form">
-        <div class="config-group-title">Embedding（硅基流动）</div>
+      <el-form label-width="120px" class="settings-form">
+        <div class="config-group-title">Embedding</div>
         <el-form-item label="API Key">
           <el-input v-model="rag.siliconflow_api_key" type="password" show-password placeholder="sk-..." />
         </el-form-item>
         <el-form-item label="Base URL">
-          <el-input v-model="rag.siliconflow_base_url" />
+          <el-input v-model="rag.siliconflow_base_url" :placeholder="RAG_DEFAULTS.siliconflow_base_url" />
         </el-form-item>
-        <el-form-item label="Embedding 模型">
-          <el-input v-model="rag.embedding_model" />
+        <el-form-item label="模型">
+          <el-input v-model="rag.embedding_model" :placeholder="RAG_DEFAULTS.embedding_model" />
         </el-form-item>
 
-        <div class="config-group-title" style="margin-top: 20px">Chat 生成（DeepSeek）</div>
+        <div class="config-group-title" style="margin-top: 24px">Chat 生成</div>
         <el-form-item label="API Key">
           <el-input v-model="rag.deepseek_api_key" type="password" show-password placeholder="sk-..." />
         </el-form-item>
         <el-form-item label="Base URL">
-          <el-input v-model="rag.deepseek_base_url" />
+          <el-input v-model="rag.deepseek_base_url" :placeholder="RAG_DEFAULTS.deepseek_base_url" />
         </el-form-item>
-        <el-form-item label="Chat 模型">
-          <el-input v-model="rag.deepseek_model" />
+        <el-form-item label="模型">
+          <el-input v-model="rag.deepseek_model" :placeholder="RAG_DEFAULTS.deepseek_model" />
         </el-form-item>
 
         <el-form-item>
@@ -65,7 +72,14 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
-import { rssApi, type RagConfig } from '../api/client'
+import { rssApi, type RagConfig, getErrorMessage } from '../api/client'
+
+const RAG_DEFAULTS = {
+  siliconflow_base_url: 'e.g. https://api.siliconflow.cn/v1',
+  embedding_model: 'e.g. BAAI/bge-m3',
+  deepseek_base_url: 'e.g. https://api.deepseek.com',
+  deepseek_model: 'e.g. deepseek-chat',
+}
 
 const provider = reactive({
   name: 'OpenAI Compatible Demo',
@@ -77,11 +91,11 @@ const provider = reactive({
 
 const rag = reactive<RagConfig>({
   siliconflow_api_key: '',
-  siliconflow_base_url: 'https://api.siliconflow.cn/v1',
-  embedding_model: 'BAAI/bge-m3',
+  siliconflow_base_url: '',
+  embedding_model: '',
   deepseek_api_key: '',
-  deepseek_base_url: 'https://api.deepseek.com',
-  deepseek_model: 'deepseek-v4-flash',
+  deepseek_base_url: '',
+  deepseek_model: '',
 })
 
 const saving = ref(false)
@@ -90,8 +104,8 @@ onMounted(async () => {
   try {
     const cfg = await rssApi.getRagConfig()
     Object.assign(rag, cfg)
-  } catch {
-    // 后端未启动时忽略
+  } catch (e: unknown) {
+    ElMessage.warning(getErrorMessage(e))
   }
 })
 
@@ -104,8 +118,8 @@ async function saveRag() {
   try {
     await rssApi.saveRagConfig({ ...rag })
     ElMessage.success('RAG 配置已保存')
-  } catch {
-    ElMessage.error('保存失败，请检查后端是否运行')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e))
   } finally {
     saving.value = false
   }
@@ -113,8 +127,12 @@ async function saveRag() {
 </script>
 
 <style scoped>
+.ai-settings-page {
+  padding: 24px;
+}
+
 .settings-form {
-  max-width: 720px;
+  width: 100%;
   margin-top: 16px;
 }
 
@@ -126,7 +144,7 @@ async function saveRag() {
 }
 
 .rag-panel {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 
 .config-group-title {
@@ -134,8 +152,7 @@ async function saveRag() {
   font-weight: 600;
   color: var(--el-text-color-secondary);
   margin-bottom: 12px;
-  padding-left: 4px;
-  border-left: 3px solid var(--el-color-primary);
   padding-left: 8px;
+  border-left: 3px solid var(--el-color-primary);
 }
 </style>

@@ -7,6 +7,20 @@ export const api = axios.create({
   timeout: 10000
 })
 
+/** 从 axios 错误中提取可读的错误信息，按规则映射为用户友好文案 */
+export function getErrorMessage(e: unknown, fallback = '请求异常，请检查网络或后端配置'): string {
+  if (axios.isAxiosError(e)) {
+    const status = e.response?.status
+    if (status === 401 || status === 403) {
+      return '鉴权失败：请检查您的 API 密钥 (API Key) 是否正确'
+    }
+    if (status === 404 || status === 500 || !e.response) {
+      return '连接失败：无法访问后端服务，请检查 API URL 链接是否正确'
+    }
+  }
+  return fallback
+}
+
 export interface Feed {
   id: number
   title: string
@@ -217,7 +231,7 @@ export const rssApi = {
   ragIndex: () =>
     api.post<{ status: string; message: string }>('/rag/index').then((res) => res.data),
   ragIndexStatus: () =>
-    api.get<{ running: boolean; last_indexed: number }>('/rag/index/status').then((res) => res.data),
+    api.get<{ running: boolean; last_indexed: number; error: string }>('/rag/index/status').then((res) => res.data),
   getRagConfig: () =>
     api.get<RagConfig>('/rag/config').then((res) => res.data),
   saveRagConfig: (config: RagConfig) =>
