@@ -220,3 +220,8 @@
 - 前端订阅管理页适配新的添加结果，手动添加 partial 会显示 warning 和同步结果表；OPML 结果表也会显示 partial 状态、失败原因和建议。
 - 同步更新 `update_docs/Week14_handingna.md`，说明手动添加、OPML 导入、partial 语义和重试方式。
 - 当前限制：首次同步仍是同步请求流程，源站超时或拒绝访问时需要用户后续手动重试同步。
+
+## 2026-06-08
+
+- 使用 AI Coding Agent 按要求撤回 `update_docs/Week14_handingna.md` 中本次关于“添加订阅后首次同步”的周报修改。
+- 本次仅调整周报记录范围，不改变后端、前端、测试或数据库清空结果。
