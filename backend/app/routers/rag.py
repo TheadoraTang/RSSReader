@@ -5,7 +5,7 @@ from app.database import get_connection
 
 router = APIRouter()
 
-_index_status = {"running": False, "last_indexed": 0, "error": ""}
+_index_status = {"running": False, "last_added": 0, "last_removed": 0, "error": ""}
 
 
 class AskRequest(BaseModel):
@@ -30,6 +30,7 @@ class RagConfig(BaseModel):
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"
     embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
@@ -43,6 +44,7 @@ def get_rag_config():
         siliconflow_api_key=cfg["rag_siliconflow_api_key"],
         siliconflow_base_url=cfg["rag_siliconflow_base_url"],
         embedding_model=cfg["rag_embedding_model"],
+        embedding_dim=int(cfg.get("rag_embedding_dim", 1024)),
         deepseek_api_key=cfg["rag_deepseek_api_key"],
         deepseek_base_url=cfg["rag_deepseek_base_url"],
         deepseek_model=cfg["rag_deepseek_model"],
@@ -55,6 +57,7 @@ def save_rag_config(body: RagConfig):
         "rag_siliconflow_api_key": body.siliconflow_api_key,
         "rag_siliconflow_base_url": body.siliconflow_base_url,
         "rag_embedding_model": body.embedding_model,
+        "rag_embedding_dim": str(body.embedding_dim),
         "rag_deepseek_api_key": body.deepseek_api_key,
         "rag_deepseek_base_url": body.deepseek_base_url,
         "rag_deepseek_model": body.deepseek_model,
@@ -66,6 +69,12 @@ def save_rag_config(body: RagConfig):
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+    # reinitialize vec table in case embedding_dim changed
+    try:
+        from app.services.rag_service import initialize_vec_table
+        initialize_vec_table()
+    except Exception:
+        pass
     return body
 
 
@@ -95,8 +104,9 @@ def _run_index():
     _index_status["error"] = ""
     try:
         from app.services.rag_service import index_all_entries
-        count = index_all_entries()
-        _index_status["last_indexed"] = count
+        result = index_all_entries()
+        _index_status["last_added"] = result["added"]
+        _index_status["last_removed"] = result["removed"]
     except Exception as exc:
         msg = str(exc)
         if "connection" in msg.lower() or "connect" in msg.lower():
@@ -121,6 +131,7 @@ def trigger_index(background_tasks: BackgroundTasks):
 def index_status():
     return {
         "running": _index_status["running"],
-        "last_indexed": _index_status["last_indexed"],
+        "last_added": _index_status["last_added"],
+        "last_removed": _index_status["last_removed"],
         "error": _index_status["error"],
     }

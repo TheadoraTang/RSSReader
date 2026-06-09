@@ -115,7 +115,11 @@ async function doIndex() {
           if (status.error) {
             ElMessage.error(status.error)
           } else {
-            ElMessage.success(`索引完成，本次新增 ${status.last_indexed} 篇文章`)
+            const parts = []
+            if (status.last_added > 0) parts.push(`新增 ${status.last_added} 篇`)
+            if (status.last_removed > 0) parts.push(`删除 ${status.last_removed} 篇`)
+            const detail = parts.length > 0 ? `（${parts.join('，')}）` : '（无变化）'
+            ElMessage.success(`索引完成 ${detail}`)
           }
         }
       } catch {
@@ -210,10 +214,11 @@ const renderedAnswer = computed(() => {
 }
 
 .answer-box {
-  background: var(--el-fill-color-lighter);
-  border: 1px solid var(--el-border-color-lighter);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 16px;
+  color: inherit;
 }
 
 .answer-label,
@@ -242,9 +247,11 @@ const renderedAnswer = computed(() => {
   display: flex;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--el-border-color-lighter);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   cursor: pointer;
+  color: inherit;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
@@ -310,5 +317,28 @@ const renderedAnswer = computed(() => {
 .ask-empty-icon {
   font-size: 48px;
   opacity: 0.3;
+}
+</style>
+
+<style>
+body.theme-dark .ask-title,
+body.theme-dark .ask-subtitle,
+body.theme-dark .answer-text,
+body.theme-dark .answer-label,
+body.theme-dark .sources-label,
+body.theme-dark .source-title,
+body.theme-dark .source-snippet,
+body.theme-dark .source-date,
+body.theme-dark .ask-hint {
+  color: #e8eaed;
+}
+
+body.theme-dark .ask-subtitle,
+body.theme-dark .answer-label,
+body.theme-dark .sources-label,
+body.theme-dark .source-snippet,
+body.theme-dark .source-date,
+body.theme-dark .ask-hint {
+  color: #9aa4b2;
 }
 </style>

@@ -96,6 +96,7 @@ export interface RagConfig {
   siliconflow_api_key: string
   siliconflow_base_url: string
   embedding_model: string
+  embedding_dim: number
   deepseek_api_key: string
   deepseek_base_url: string
   deepseek_model: string
@@ -231,7 +232,7 @@ export const rssApi = {
   ragIndex: () =>
     api.post<{ status: string; message: string }>('/rag/index').then((res) => res.data),
   ragIndexStatus: () =>
-    api.get<{ running: boolean; last_indexed: number; error: string }>('/rag/index/status').then((res) => res.data),
+    api.get<{ running: boolean; last_added: number; last_removed: number; error: string }>('/rag/index/status').then((res) => res.data),
   getRagConfig: () =>
     api.get<RagConfig>('/rag/config').then((res) => res.data),
   saveRagConfig: (config: RagConfig) =>

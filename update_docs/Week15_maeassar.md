@@ -155,8 +155,46 @@ npm run dev
 
 ---
 
+## 后续补丁（同分支）
+
+### RAG 稳定性修复
+
+**问题 1：删除文章后向量索引未清理**
+
+- `sqlite_repository.py`：`delete_feed()` 删除 feed 前先遍历 entry ID，逐条调用 `delete_entry_vec()`
+- `rag_service.py`：新增 `delete_entry_vec(entry_id)` 函数
+- `rag_service.py`：`index_all_entries()` 执行时同步清理已删除文章的残留向量（stale cleanup）
+- `rag_service.py`：`retrieve()` 改为 over-fetch（`top_k * 3`），过滤删除条目后取前 `top_k`，避免返回空结果
+
+**问题 2：Embedding 维度不匹配导致 500 错误**
+
+- `rag_service.py`：`_embed()` 改为从 DB 配置读取维度（而非硬编码 1024），并传入 `dimensions` 参数让 API 截断
+- `rag_service.py`：`initialize_vec_table()` 新增检测逻辑——若现有表维度与配置不一致，自动 DROP 重建（无需重启）
+- `rag.py`：`save_rag_config()` 保存后自动触发 `initialize_vec_table()`，改维度保存即生效
+
+**问题 3：不兼容的 Embedding 模型**
+
+经测试，阿里云 `text-embedding-async-v2` 和 `tongyi-embedding-vision-flash` 不支持 OpenAI 兼容接口（异步任务设计/多模态接口），调用返回 404。推荐模型：
+- 硅基流动：`BAAI/bge-m3`（1024 维）
+- 阿里云千问：`text-embedding-v4`（支持 `dimensions=1024`）
+
+AI 设置页向量维度字段提示更新为以上两个推荐模型。
+
+**问题 4：AskView 暗黑模式样式**
+
+- `AskView.vue`：`answer-box` 和 `source-card` 改用 `--app-surface` / `--app-border` CSS 变量适配暗色主题
+- 非 scoped `<style>` 块通过 `body.theme-dark` 选择器覆盖文字颜色（主色 `#e8eaed`，次色 `#9aa4b2`）
+
+**功能：索引完成提示新增变更统计**
+
+- 索引完成弹窗改为显示"新增 N 篇，删除 N 篇"，无变化时显示"（无变化）"
+- 后端 `index_all_entries()` 返回 `{"added": n, "removed": n}`，`/index/status` 接口暴露 `last_added` / `last_removed` 字段
+
+---
+
 ## 当前限制
 
 - 向量索引为全量构建，文章较多时建立索引耗时较长（后台异步处理，不阻塞 UI）
 - RAG 基于已同步文章，需先订阅并同步 RSS 源
 - sqlite-vec 需要系统支持动态库加载（`enable_load_extension`）
+- 不兼容 OpenAI 接口的模型（如 `text-embedding-async-v2`）无法使用，需换用支持兼容模式的模型
