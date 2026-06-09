@@ -40,6 +40,7 @@ def get_config() -> dict:
         "rag_siliconflow_api_key": os.environ.get("SILICONFLOW_API_KEY", ""),
         "rag_siliconflow_base_url": SILICONFLOW_BASE_URL,
         "rag_embedding_model": EMBEDDING_MODEL,
+        "rag_embedding_dim": str(EMBEDDING_DIM),
         "rag_deepseek_api_key": os.environ.get("DEEPSEEK_API_KEY", ""),
         "rag_deepseek_base_url": DEEPSEEK_BASE_URL,
         "rag_deepseek_model": DEEPSEEK_MODEL,
@@ -75,20 +76,51 @@ def _serialize(vec: list[float]) -> bytes:
 
 def _embed(text: str) -> list[float]:
     cfg = get_config()
+    dim = int(cfg.get("rag_embedding_dim", EMBEDDING_DIM))
     client = OpenAI(api_key=cfg["rag_siliconflow_api_key"], base_url=cfg["rag_siliconflow_base_url"])
-    resp = client.embeddings.create(model=cfg["rag_embedding_model"], input=text)
-    return resp.data[0].embedding
+    resp = client.embeddings.create(
+        model=cfg["rag_embedding_model"],
+        input=text,
+        dimensions=dim,
+    )
+    vec = resp.data[0].embedding
+    if len(vec) != dim:
+        raise ValueError(
+            f"Embedding 维度不匹配：模型返回 {len(vec)} 维，但向量索引固定为 {dim} 维。"
+            f"请使用输出 {dim} 维的 Embedding 模型，或在 AI 设置中修改向量维度后重新建立索引。"
+        )
+    return vec
 
 
 # ── Vector table init ─────────────────────────────────────────────────────────
 
+def _get_current_vec_dim(conn: sqlite3.Connection) -> int | None:
+    """Return the dimension of the existing entries_vec table, or None if it doesn't exist."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='entries_vec'"
+    ).fetchone()
+    if row is None:
+        return None
+    import re
+    m = re.search(r'FLOAT\[(\d+)\]', row[0] or "")
+    return int(m.group(1)) if m else None
+
+
 def initialize_vec_table() -> None:
-    """Create the vec0 virtual table if it doesn't exist."""
+    """Create the vec0 virtual table if needed, recreating it if the dimension changed."""
+    cfg = get_config()
+    dim = int(cfg.get("rag_embedding_dim", EMBEDDING_DIM))
     with _vec_conn() as conn:
-        conn.execute(
-            f"CREATE VIRTUAL TABLE IF NOT EXISTS entries_vec "
-            f"USING vec0(entry_id INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}])"
-        )
+        existing_dim = _get_current_vec_dim(conn)
+        if existing_dim is not None and existing_dim != dim:
+            # dimension changed — drop and recreate (data must be re-indexed)
+            conn.execute("DROP TABLE entries_vec")
+            existing_dim = None
+        if existing_dim is None:
+            conn.execute(
+                f"CREATE VIRTUAL TABLE entries_vec "
+                f"USING vec0(entry_id INTEGER PRIMARY KEY, embedding FLOAT[{dim}])"
+            )
 
 
 # ── Indexing ──────────────────────────────────────────────────────────────────
@@ -118,19 +150,48 @@ def index_entry(entry_id: int) -> None:
         )
 
 
-def index_all_entries() -> int:
-    """Embed all entries that are not yet in the vector table. Returns count indexed."""
+def index_all_entries() -> dict:
+    """Embed all entries not yet in the vector table, and remove stale vectors.
+    Returns {"added": n, "removed": n}."""
     with get_connection() as conn:
         rows = conn.execute("SELECT id FROM entries").fetchall()
+    live_ids = {r["id"] for r in rows}
+
     with _vec_conn() as conn:
-        already = {r[0] for r in conn.execute("SELECT entry_id FROM entries_vec").fetchall()}
-    pending = [r["id"] for r in rows if r["id"] not in already]
+        vec_ids = {r[0] for r in conn.execute("SELECT entry_id FROM entries_vec").fetchall()}
+
+    # add missing
+    pending = [eid for eid in live_ids if eid not in vec_ids]
+    added = 0
     for entry_id in pending:
         try:
             index_entry(entry_id)
+            added += 1
         except Exception:
             pass
-    return len(pending)
+
+    # remove stale (vectors for deleted entries)
+    stale = vec_ids - live_ids
+    removed = 0
+    if stale:
+        with _vec_conn() as conn:
+            for entry_id in stale:
+                try:
+                    conn.execute("DELETE FROM entries_vec WHERE entry_id = ?", (entry_id,))
+                    removed += 1
+                except Exception:
+                    pass
+
+    return {"added": added, "removed": removed}
+
+
+def delete_entry_vec(entry_id: int) -> None:
+    """Remove a single entry from the vector table."""
+    try:
+        with _vec_conn() as conn:
+            conn.execute("DELETE FROM entries_vec WHERE entry_id = ?", (entry_id,))
+    except Exception:
+        pass
 
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────
@@ -138,6 +199,8 @@ def index_all_entries() -> int:
 def retrieve(query: str, top_k: int = TOP_K) -> list[dict]:
     """Return top-k articles most similar to the query."""
     q_vec = _embed(query)
+    # fetch extra candidates to account for deleted entries that may no longer exist
+    fetch_k = top_k * 3
     with _vec_conn() as conn:
         rows = conn.execute(
             """
@@ -147,7 +210,7 @@ def retrieve(query: str, top_k: int = TOP_K) -> list[dict]:
               AND k = ?
             ORDER BY distance
             """,
-            (_serialize(q_vec), top_k),
+            (_serialize(q_vec), fetch_k),
         ).fetchall()
     if not rows:
         return []
@@ -179,7 +242,7 @@ def retrieve(query: str, top_k: int = TOP_K) -> list[dict]:
             "distance": distance_map.get(e["id"], 9999),
         })
     result.sort(key=lambda x: x["distance"])
-    return result
+    return result[:top_k]
 
 
 # ── Generation ────────────────────────────────────────────────────────────────

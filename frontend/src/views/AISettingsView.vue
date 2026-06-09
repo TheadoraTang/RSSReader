@@ -49,6 +49,10 @@
         <el-form-item label="模型">
           <el-input v-model="rag.embedding_model" :placeholder="RAG_DEFAULTS.embedding_model" />
         </el-form-item>
+        <el-form-item label="向量维度">
+          <el-input-number v-model="rag.embedding_dim" :min="64" :max="4096" :step="64" style="width: 160px" />
+          <span class="field-hint">推荐：BAAI/bge-m3（硅基流动）或 text-embedding-v4（千问），均为 1024 维</span>
+        </el-form-item>
 
         <div class="config-group-title" style="margin-top: 24px">Chat 生成</div>
         <el-form-item label="API Key">
@@ -93,6 +97,7 @@ const rag = reactive<RagConfig>({
   siliconflow_api_key: '',
   siliconflow_base_url: '',
   embedding_model: '',
+  embedding_dim: 1024,
   deepseek_api_key: '',
   deepseek_base_url: '',
   deepseek_model: '',
@@ -145,6 +150,12 @@ async function saveRag() {
 
 .rag-panel {
   margin-top: 24px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  margin-left: 10px;
 }
 
 .config-group-title {

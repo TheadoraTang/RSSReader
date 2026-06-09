@@ -125,7 +125,14 @@ class SQLiteRepository:
     def delete_feed(self, feed_id):
         self._feed_row(feed_id)
         with get_connection() as conn:
+            entry_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM entries WHERE feed_id = ?", (feed_id,)
+            ).fetchall()]
             conn.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
+        # clean up vector index for deleted entries
+        from app.services.rag_service import delete_entry_vec
+        for eid in entry_ids:
+            delete_entry_vec(eid)
 
     def sync_feed(self, feed_id):
         feed = self._feed_row(feed_id)
