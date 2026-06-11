@@ -201,30 +201,33 @@
           <el-tooltip :content="store.selectedArticle.is_starred ? '取消收藏' : '收藏'" placement="top">
             <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_starred }" :icon="Star" circle @click="store.toggleStar(store.selectedArticle)" />
           </el-tooltip>
-          <el-dropdown trigger="click" @command="handleSummaryCommand">
-            <el-button class="toolbar-icon-button" :loading="summaryRunning" :icon="MagicStick" circle aria-label="生成摘要" />
-            <template #dropdown>
-              <el-dropdown-menu>
-                <div class="summary-dropdown-settings" @click.stop>
-                  <span class="dropdown-inline-label">摘要模式</span>
-                  <el-segmented v-model="summaryMode" :options="summaryModeOptions" size="small" />
-                  <span class="dropdown-inline-label">语言</span>
-                  <el-segmented v-model="summaryLanguage" :options="summaryLanguageOptions" size="small" />
-                  <span class="dropdown-inline-label">长度</span>
-                  <el-input-number v-model="summaryMaxWords" :min="120" :max="1200" :step="60" size="small" />
-                </div>
-                <el-dropdown-item command="default">默认 Provider</el-dropdown-item>
-                <el-dropdown-item
+          <el-popover placement="bottom" :width="320" trigger="click" popper-class="summary-popover">
+            <template #reference>
+              <el-button class="toolbar-icon-button" :loading="summaryRunning" :icon="MagicStick" circle aria-label="AI 摘要" />
+            </template>
+            <div class="summary-popover-body">
+              <label class="dropdown-inline-label">Provider</label>
+              <el-select v-model="summaryProviderId" size="small" placeholder="默认 Provider" style="width: 100%">
+                <el-option label="默认 Provider" :value="null" />
+                <el-option
                   v-for="provider in summaryProviders"
                   :key="provider.id"
-                  :command="`provider:${provider.id}`"
+                  :label="`${provider.is_default ? '✓ ' : ''}${provider.name} · ${provider.model}`"
+                  :value="provider.id"
                   :disabled="!provider.enabled"
-                >
-                  {{ provider.is_default ? '✓ ' : '' }}{{ provider.name }} · {{ provider.model }}
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+                />
+              </el-select>
+              <label class="dropdown-inline-label">摘要模式</label>
+              <el-segmented v-model="summaryMode" :options="summaryModeOptions" size="small" />
+              <label class="dropdown-inline-label">语言</label>
+              <el-segmented v-model="summaryLanguage" :options="summaryLanguageOptions" size="small" />
+              <label class="dropdown-inline-label">长度</label>
+              <el-input-number v-model="summaryMaxWords" :min="120" :max="1200" :step="60" size="small" style="width: 100%" />
+              <el-button type="primary" :icon="MagicStick" :loading="summaryRunning" class="summary-generate-button" @click="runSummary">
+                生成摘要
+              </el-button>
+            </div>
+          </el-popover>
           <el-popover placement="bottom" :width="320" trigger="click" popper-class="tag-popover">
             <template #reference>
               <el-button class="toolbar-icon-button" :icon="CollectionTag" circle aria-label="标签" title="标签" />
@@ -357,6 +360,7 @@ const aiResult = ref('')
 const summaryUsage = ref('')
 const summaryRunning = ref(false)
 const summaryProviders = ref<LLMProvider[]>([])
+const summaryProviderId = ref<number | null>(null)
 const summaryMode = ref<'brief' | 'structured' | 'deep'>('structured')
 const summaryLanguage = ref<'zh' | 'en'>('zh')
 const summaryMaxWords = ref(450)
@@ -454,7 +458,13 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleWindowResize)
 })
 
-watch(() => store.selectedArticle?.id, loadNote)
+watch(
+  () => store.selectedArticle?.id,
+  async () => {
+    clearSummaryResult()
+    await loadNote()
+  }
+)
 watch(renderedArticleHtml, decorateArticleLinks, { flush: 'post' })
 watch(
   () => store.articles,
@@ -842,17 +852,17 @@ function renderMarkdownInline(value: string, options: { allowLinks?: boolean } =
   return html
 }
 
-async function handleSummaryCommand(command: string) {
-  const providerId = command.startsWith('provider:') ? Number(command.replace('provider:', '')) : null
-  await runSummary(providerId)
+function clearSummaryResult() {
+  aiResult.value = ''
+  summaryUsage.value = ''
 }
 
-async function runSummary(providerId: number | null = null) {
+async function runSummary() {
   if (!store.selectedArticle) return
   summaryRunning.value = true
   try {
     const data = await rssApi.summary(store.selectedArticle.id, {
-      provider_id: providerId,
+      provider_id: summaryProviderId.value,
       refresh: true,
       mode: summaryMode.value,
       language: summaryLanguage.value,
@@ -1173,11 +1183,14 @@ function exportNote() {
   margin: 18px 0 0;
 }
 
-.summary-dropdown-settings {
-  width: 260px;
+.summary-popover-body {
   display: grid;
   gap: 8px;
-  padding: 10px 12px;
+}
+
+.summary-generate-button {
+  width: 100%;
+  margin-top: 4px;
 }
 
 .summary-result-title {
