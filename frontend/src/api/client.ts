@@ -1,9 +1,10 @@
 import axios from 'axios'
 
 const desktopApiBaseUrl = window.rssReaderDesktop?.apiBaseUrl
+const apiBaseUrl = desktopApiBaseUrl ? `${desktopApiBaseUrl}/api` : '/api'
 
 export const api = axios.create({
-  baseURL: desktopApiBaseUrl ? `${desktopApiBaseUrl}/api` : '/api',
+  baseURL: apiBaseUrl,
   timeout: 10000
 })
 
@@ -76,6 +77,36 @@ export interface AIResult {
   input_tokens: number
   output_tokens: number
   created_at: string
+}
+
+export interface SummaryRequestPayload {
+  provider_id?: number | null
+  refresh?: boolean
+  mode?: 'brief' | 'structured' | 'deep'
+  language?: 'zh' | 'en'
+  max_words?: number
+}
+
+export interface SummaryStreamEvent {
+  type: string
+  title?: string
+  detail?: string
+  result?: AIResult
+  usage?: {
+    input_tokens: number
+    output_tokens: number
+  }
+  total_usage?: {
+    input_tokens: number
+    output_tokens: number
+  }
+  index?: number
+  total?: number
+  round?: number
+  chunks?: number
+  estimated_tokens?: number
+  input_budget?: number
+  ts?: number
 }
 
 export type LLMProviderType = 'openai_compatible' | 'vllm' | 'ollama' | 'custom'
@@ -251,15 +282,11 @@ export const rssApi = {
     api.post<BatchDigestExportResponse>('/export/digests/markdown', payload).then((res) => res.data),
   summary: (
     articleId: number,
-    payload?: {
-      provider_id?: number | null
-      refresh?: boolean
-      mode?: 'brief' | 'structured' | 'deep'
-      language?: 'zh' | 'en'
-      max_words?: number
-    }
+    payload?: SummaryRequestPayload
   ) =>
     api.post<AIResult>(`/ai/summary/${articleId}`, payload ?? {}, { timeout: 300000 }).then((res) => res.data),
+  streamSummary: (articleId: number, payload: SummaryRequestPayload | undefined, onEvent: (event: SummaryStreamEvent) => void) =>
+    streamSse<SummaryStreamEvent>(`${apiBaseUrl}/ai/summary/${articleId}/stream`, payload ?? {}, onEvent),
   translate: (articleId: number) => api.post<AIResult>(`/ai/translate/${articleId}`).then((res) => res.data),
   suggestTags: (articleId: number) => api.post<AIResult>(`/ai/tag-suggest/${articleId}`).then((res) => res.data),
   llmProviders: () => api.get<LLMProvider[]>('/ai/providers').then((res) => res.data),
@@ -281,4 +308,70 @@ export const rssApi = {
   saveRagConfig: (config: RagConfig) =>
     api.put<RagConfig>('/rag/config', config).then((res) => res.data)
   
+}
+
+async function streamSse<T>(url: string, payload: unknown, onEvent: (event: T) => void) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(await fetchErrorMessage(response))
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) {
+      const data = frame
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+        .join('\n')
+      if (!data) continue
+      const event = JSON.parse(data) as T
+      throwIfStreamError(event)
+      onEvent(event)
+    }
+  }
+
+  buffer += decoder.decode()
+  if (buffer.trim()) {
+    const data = buffer
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .join('\n')
+    if (data) {
+      const event = JSON.parse(data) as T
+      throwIfStreamError(event)
+      onEvent(event)
+    }
+  }
+}
+
+function throwIfStreamError(event: unknown) {
+  const streamEvent = event as { type?: string; detail?: string }
+  if (streamEvent.type === 'error') {
+    throw new Error(streamEvent.detail || '摘要生成失败，请检查 Provider 配置')
+  }
+}
+
+async function fetchErrorMessage(response: Response) {
+  try {
+    const data = await response.json()
+    if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail
+  } catch {
+    // Ignore non-JSON error bodies.
+  }
+  if (response.status === 401 || response.status === 403) return '鉴权失败：请检查您的 API 密钥 (API Key) 是否正确'
+  return '连接失败：无法访问后端服务，请检查 API URL 链接是否正确'
 }

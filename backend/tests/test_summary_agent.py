@@ -145,6 +145,47 @@ class SummaryAgentTest(unittest.TestCase):
         self.assertIn("final merge", result.prompt)
         self.assertGreater(result.usage.input_tokens, 300)
 
+    def test_long_article_emits_real_agent_progress_events(self):
+        article = {
+            "title": "Long context article",
+            "cleaned_markdown": "\n\n".join(
+                [
+                    "第一部分：" + ("开头事实 " * 120),
+                    "第二部分：" + ("结尾事实 " * 120),
+                ]
+            ),
+        }
+        provider = {
+            "name": "Local Ollama Qwen3 8B",
+            "provider_type": "ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "api_key": "ollama",
+            "model": "qwen3:8b",
+            "enabled": True,
+        }
+        options = SummaryOptions(
+            mode="structured",
+            language="zh",
+            max_words=160,
+            context_window_tokens=900,
+            chunk_token_budget=180,
+            chunk_overlap_tokens=0,
+        )
+        events = []
+
+        with patch("app.services.summary_agent.OpenAI", SequencedOpenAI):
+            summarize_with_provider(article, provider, options, on_event=events.append)
+
+        event_types = [event["type"] for event in events]
+        self.assertIn("prepare", event_types)
+        self.assertIn("budget", event_types)
+        self.assertIn("chunk_plan", event_types)
+        self.assertIn("chunk_start", event_types)
+        self.assertIn("chunk_done", event_types)
+        self.assertIn("final_start", event_types)
+        self.assertIn("final_done", event_types)
+        self.assertGreaterEqual(event_types.count("chunk_start"), 2)
+
     def test_clean_model_output_removes_qwen_thinking_blocks(self):
         text = clean_model_output("<think>分析过程</think>\n最终答案：摘要正文")
 

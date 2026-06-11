@@ -232,6 +232,11 @@
 - 当日验证：后端 `python3 -m unittest discover -s backend/tests` 通过，前端 `./node_modules/.bin/vue-tsc --noEmit --pretty false` 通过，真实 Ollama/Qwen3 API 摘要和 `/api/stats/llm` 用量聚合通过。
 - 当前限制：vLLM 模板和 OpenAI-compatible 调用链路已完成，但本次真实本地推理使用的是 Ollama `qwen3:8b`；若需要演示 vLLM 权重加载，还需要在具备足够 GPU/内存的机器上单独启动 vLLM。
 - 根据人工验收反馈继续优化摘要交互：provider 不再承担“开始生成”的动作，摘要面板新增明确的 `生成摘要` 按钮；摘要运行时展示贴合阅读页风格的内嵌思考流，步骤按时间顺序逐条向下追加，完成后自动折叠，用户可重新展开查看思考过程；切换文章时清空上一篇摘要，避免结果串页。
+- 根据进一步反馈修正“思考流”实现：移除前端 `setInterval` 固定步骤和 prompt 事后解析，改为后端 Summary Agent 在真实执行节点发出 `prepare`、`budget`、`chunk_start`、`chunk_done`、`final_start`、`final_done`、`save_done` 等事件。
+- 新增 `POST /api/ai/summary/{article_id}/stream`，使用 `StreamingResponse` 输出 SSE；前端 `streamSummary()` 用 `fetch` POST 请求读取流，阅读页只渲染真实后端事件，并展示当前步骤实际停留时间。
+- 对本地 Ollama `qwen3:8b` 执行真实长文流式摘要验证：文章约 `15008` 输入 tokens，正文切成 `4` 个 chunk，最终合成并保存，累计用量 `14145` input tokens / `863` output tokens。
+- 为避免最后结果帧过大，流式 `result` 事件不再携带完整 prompt trace；数据库中的 `ai_results.prompt` 仍保留完整多轮 trace，便于开发排查。
+- 更新 `update_docs/Week16_GentleCold.md`，记录真实事件流实现、Ollama 测试、前端假进度问题和解决方案。
 
 ## 2026-06-08（布局适配修正）
 

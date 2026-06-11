@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from html import unescape
 import re
+import time
 
 from openai import OpenAI
 
 
 class SummaryAgentError(RuntimeError):
     pass
+
+
+SummaryEventHandler = Callable[[dict], None]
 
 
 @dataclass
@@ -101,6 +106,7 @@ def summarize_with_provider(
     article: dict,
     provider: dict,
     options: SummaryOptions | None = None,
+    on_event: SummaryEventHandler | None = None,
 ) -> SummaryResult:
     if not provider.get("enabled", True):
         raise SummaryAgentError("当前 LLM Provider 未启用，请在 AI 设置中启用后重试。")
@@ -112,14 +118,39 @@ def summarize_with_provider(
 
     options = options or SummaryOptions()
     system_prompt, user_prompt = build_summary_prompt(article, options)
+    article_tokens = _estimate_tokens(system_prompt + user_prompt)
+    input_budget = _input_token_budget(options)
+    _emit(
+        on_event,
+        "prepare",
+        "读取文章上下文",
+        "已整理标题、订阅源、正文和摘要参数。",
+        provider=provider.get("name"),
+        model=provider.get("model"),
+    )
+    _emit(
+        on_event,
+        "budget",
+        "评估上下文预算",
+        f"文章输入约 {article_tokens} tokens，当前单轮输入预算约 {input_budget} tokens。",
+        estimated_tokens=article_tokens,
+        input_budget=input_budget,
+    )
     try:
         client = OpenAI(
             api_key=provider.get("api_key") or "EMPTY",
             base_url=base_url,
             timeout=60,
         )
-        if _estimate_tokens(system_prompt + user_prompt) > _input_token_budget(options):
-            return _summarize_long_article(client, article, provider, options)
+        if article_tokens > input_budget:
+            return _summarize_long_article(client, article, provider, options, on_event=on_event)
+        _emit(
+            on_event,
+            "single_start",
+            "调用模型生成摘要",
+            "文章未超过上下文预算，正在执行单轮摘要请求。",
+            max_tokens=_max_tokens_for_options(options),
+        )
         completion = _complete_chat(
             client,
             provider,
@@ -127,7 +158,15 @@ def summarize_with_provider(
             user_prompt,
             _max_tokens_for_options(options),
         )
+        _emit(
+            on_event,
+            "single_done",
+            "单轮摘要完成",
+            _usage_detail(completion.usage),
+            usage=_usage_payload(completion.usage),
+        )
     except Exception as exc:
+        _emit(on_event, "error", "摘要生成失败", _friendly_provider_error(exc, provider))
         raise SummaryAgentError(_friendly_provider_error(exc, provider)) from exc
 
     return SummaryResult(
@@ -148,14 +187,26 @@ def _summarize_long_article(
     article: dict,
     provider: dict,
     options: SummaryOptions,
+    on_event: SummaryEventHandler | None = None,
 ) -> SummaryResult:
     body = _article_body(article)
     if not body:
         system_prompt, user_prompt = build_summary_prompt(article, options)
+        _emit(on_event, "single_start", "调用模型生成摘要", "正文为空，正在基于标题和元信息生成摘要。")
         completion = _complete_chat(client, provider, system_prompt, user_prompt, _max_tokens_for_options(options))
+        _emit(on_event, "single_done", "单轮摘要完成", _usage_detail(completion.usage), usage=_usage_payload(completion.usage))
         return SummaryResult(completion.text, completion.usage, f"{system_prompt}\n\n{user_prompt}")
 
     chunks = _split_text_by_token_budget(body, options.chunk_token_budget, options.chunk_overlap_tokens)
+    _emit(
+        on_event,
+        "chunk_plan",
+        "切分长文上下文",
+        f"正文约 {_estimate_tokens(body)} tokens，已切成 {len(chunks)} 个片段逐段摘要。",
+        source_tokens=_estimate_tokens(body),
+        chunks=len(chunks),
+        chunk_token_budget=options.chunk_token_budget,
+    )
     total_usage = SummaryUsage(0, 0)
     trace = [
         "多轮上下文摘要流程：",
@@ -167,33 +218,101 @@ def _summarize_long_article(
     notes: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
         system_prompt, user_prompt = _build_chunk_prompt(article, chunk, index, len(chunks), options)
+        _emit(
+            on_event,
+            "chunk_start",
+            f"提取片段 {index}/{len(chunks)}",
+            f"正在调用模型读取第 {index} 个片段，生成可合并的事实笔记。",
+            index=index,
+            total=len(chunks),
+            estimated_tokens=_estimate_tokens(system_prompt + user_prompt),
+        )
         completion = _complete_chat(client, provider, system_prompt, user_prompt, 650)
         _add_usage(total_usage, completion.usage)
         notes.append(f"片段 {index}/{len(chunks)} 笔记：\n{completion.text}")
         trace.append(_trace_prompt(f"chunk {index}/{len(chunks)}", system_prompt, user_prompt))
+        _emit(
+            on_event,
+            "chunk_done",
+            f"片段 {index}/{len(chunks)} 完成",
+            _usage_detail(completion.usage),
+            index=index,
+            total=len(chunks),
+            usage=_usage_payload(completion.usage),
+        )
 
     notes_text = "\n\n".join(notes)
     round_number = 1
     while _estimate_tokens(notes_text) > _input_token_budget(options) and round_number <= options.max_rounds:
         compressed_notes: list[str] = []
         note_chunks = _split_text_by_token_budget(notes_text, options.chunk_token_budget, 0)
+        _emit(
+            on_event,
+            "compact_plan",
+            f"压缩中间笔记 第 {round_number} 轮",
+            f"中间笔记仍约 {_estimate_tokens(notes_text)} tokens，超过最终合并预算，将分成 {len(note_chunks)} 组压缩。",
+            round=round_number,
+            chunks=len(note_chunks),
+            estimated_tokens=_estimate_tokens(notes_text),
+        )
         for index, note_chunk in enumerate(note_chunks, start=1):
             system_prompt, user_prompt = _build_compaction_prompt(note_chunk, index, len(note_chunks), round_number, options)
+            _emit(
+                on_event,
+                "compact_start",
+                f"压缩笔记 {index}/{len(note_chunks)}",
+                f"正在压缩第 {round_number} 轮的第 {index} 组中间笔记。",
+                round=round_number,
+                index=index,
+                total=len(note_chunks),
+            )
             completion = _complete_chat(client, provider, system_prompt, user_prompt, 700)
             _add_usage(total_usage, completion.usage)
             compressed_notes.append(f"压缩轮 {round_number} - {index}/{len(note_chunks)}：\n{completion.text}")
             trace.append(_trace_prompt(f"compact r{round_number} {index}/{len(note_chunks)}", system_prompt, user_prompt))
+            _emit(
+                on_event,
+                "compact_done",
+                f"压缩笔记 {index}/{len(note_chunks)} 完成",
+                _usage_detail(completion.usage),
+                round=round_number,
+                index=index,
+                total=len(note_chunks),
+                usage=_usage_payload(completion.usage),
+            )
         notes_text = "\n\n".join(compressed_notes)
         round_number += 1
 
     if _estimate_tokens(notes_text) > _input_token_budget(options):
         notes_text = _trim_to_token_budget(notes_text, _input_token_budget(options))
         trace.append("- 中间笔记超过最大压缩轮数，已按 token 预算保留前部压缩笔记。")
+        _emit(
+            on_event,
+            "trim",
+            "裁剪中间笔记",
+            "中间笔记超过最大压缩轮数，已按 token 预算保留前部压缩笔记。",
+            estimated_tokens=_estimate_tokens(notes_text),
+        )
 
     system_prompt, user_prompt = _build_final_from_notes_prompt(article, notes_text, options)
+    _emit(
+        on_event,
+        "final_start",
+        "合成最终摘要",
+        "正在基于所有片段笔记执行最终去重、排序和忠实性自检。",
+        estimated_tokens=_estimate_tokens(system_prompt + user_prompt),
+    )
     completion = _complete_chat(client, provider, system_prompt, user_prompt, _max_tokens_for_options(options))
     _add_usage(total_usage, completion.usage)
     trace.append(_trace_prompt("final merge", system_prompt, user_prompt))
+    _emit(
+        on_event,
+        "final_done",
+        "最终摘要完成",
+        f"{_usage_detail(completion.usage)}；累计 {_usage_detail(total_usage)}。",
+        usage=_usage_payload(completion.usage),
+        total_usage=_usage_payload(total_usage),
+    )
     return SummaryResult(
         text=completion.text,
         usage=total_usage,
@@ -388,6 +507,36 @@ def _trim_to_token_budget(text: str, token_budget: int) -> str:
 def _add_usage(total: SummaryUsage, usage: SummaryUsage) -> None:
     total.input_tokens += usage.input_tokens
     total.output_tokens += usage.output_tokens
+
+
+def _emit(
+    on_event: SummaryEventHandler | None,
+    event_type: str,
+    title: str,
+    detail: str,
+    **payload,
+) -> None:
+    if on_event is None:
+        return
+    event = {
+        "type": event_type,
+        "title": title,
+        "detail": detail,
+        "ts": time.time(),
+    }
+    event.update(payload)
+    on_event(event)
+
+
+def _usage_payload(usage: SummaryUsage) -> dict:
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+    }
+
+
+def _usage_detail(usage: SummaryUsage) -> str:
+    return f"本步用量 {usage.input_tokens} 输入 / {usage.output_tokens} 输出 tokens"
 
 
 def _trace_prompt(label: str, system_prompt: str, user_prompt: str) -> str:

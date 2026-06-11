@@ -300,24 +300,28 @@
         <div v-if="summaryRunning || (summaryStepsExpanded && summaryStepItems.length)" class="summary-thought-panel">
           <div class="summary-thought-header">
             <div class="summary-thought-title-group">
-              <span class="summary-thought-kicker">{{ summaryRunning ? '生成中' : '生成记录' }}</span>
-              <strong>{{ summaryRunning ? 'AI 正在阅读并组织摘要' : '摘要生成过程' }}</strong>
+              <span class="summary-thought-kicker">{{ summaryRunning ? '实时过程' : '生成记录' }}</span>
+              <strong>{{ summaryRunning ? 'Summary Agent 正在工作' : '摘要生成过程' }}</strong>
+              <small>{{ summaryRunning ? '步骤由后端真实事件驱动，耗时停留在哪里就代表当前正在做哪里。' : '可展开查看上次生成时后端执行过的步骤。' }}</small>
             </div>
-            <el-button v-if="!summaryRunning" size="small" text @click="summaryStepsExpanded = false">
-              收起
+            <el-button v-if="!summaryRunning" class="summary-thought-toggle" size="small" text @click="summaryStepsExpanded = false">
+              隐藏
             </el-button>
           </div>
           <transition-group name="summary-stream" tag="div" class="summary-thought-stream">
             <div
-              v-for="(step, index) in summaryStepItems"
-              :key="`${step.title}-${index}`"
+              v-for="step in summaryStepItems"
+              :key="step.id"
               class="summary-thought-item"
               :class="step.status"
             >
               <span class="summary-thought-line"></span>
               <span class="summary-thought-dot"></span>
               <div class="summary-thought-copy">
-                <strong>{{ step.title }}</strong>
+                <div class="summary-thought-row">
+                  <strong>{{ step.title }}</strong>
+                  <span v-if="step.elapsedMs !== undefined" class="summary-thought-time">{{ formatElapsed(step.elapsedMs) }}</span>
+                </div>
                 <p>{{ step.detail }}</p>
               </div>
             </div>
@@ -377,7 +381,7 @@ import { Check, CollectionTag, Download, Files, MagicStick, MoreFilled, Plus, Re
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Article, FeedSyncReport, LLMProvider } from '../api/client'
+import type { Article, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
 import { getErrorMessage, rssApi } from '../api/client'
 import { useReaderStore } from '../stores/reader'
 import { apiErrorMessage, showSyncReportMessage, statusTagType, syncSuggestion } from '../utils/syncDiagnostics'
@@ -391,8 +395,7 @@ const aiResult = ref('')
 const summaryUsage = ref('')
 const summaryRunning = ref(false)
 const summaryStepsExpanded = ref(false)
-const summaryStepTimer = ref<number | null>(null)
-const summaryStepCursor = ref(0)
+const summaryActiveArticleId = ref<number | null>(null)
 const summaryProviders = ref<LLMProvider[]>([])
 const summaryProviderId = ref<number | null>(null)
 const summaryMode = ref<'brief' | 'structured' | 'deep'>('structured')
@@ -408,9 +411,13 @@ const summaryLanguageOptions = [
   { label: 'EN', value: 'en' }
 ]
 type SummaryThoughtStep = {
+  id: string
   title: string
   detail: string
   status: 'active' | 'done' | 'error'
+  startedAt: number
+  elapsedMs?: number
+  eventType: string
 }
 
 const summaryStepItems = ref<SummaryThoughtStep[]>([])
@@ -497,7 +504,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('rssreader:background-sync', handleBackgroundSync)
   window.removeEventListener('resize', handleWindowResize)
-  stopSummaryStepTimer()
 })
 
 watch(
@@ -898,126 +904,136 @@ function clearSummaryResult() {
   aiResult.value = ''
   summaryUsage.value = ''
   summaryStepItems.value = []
-  summaryStepCursor.value = 0
   summaryStepsExpanded.value = false
-  stopSummaryStepTimer()
+  summaryRunning.value = false
+  summaryActiveArticleId.value = null
 }
 
 async function runSummary() {
-  if (!store.selectedArticle) return
+  const articleId = store.selectedArticle?.id
+  if (!articleId) return
   summaryRunning.value = true
-  startSummarySteps()
+  summaryActiveArticleId.value = articleId
+  summaryStepsExpanded.value = true
+  aiResult.value = ''
+  summaryUsage.value = ''
+  summaryStepItems.value = []
   try {
-    const data = await rssApi.summary(store.selectedArticle.id, {
+    await rssApi.streamSummary(articleId, {
       provider_id: summaryProviderId.value,
       refresh: true,
       mode: summaryMode.value,
       language: summaryLanguage.value,
       max_words: summaryMaxWords.value
+    }, (event) => {
+      if (summaryActiveArticleId.value !== articleId || store.selectedArticle?.id !== articleId) return
+      handleSummaryStreamEvent(event)
     })
-    aiResult.value = data.result
-    summaryUsage.value = `${data.input_tokens} 输入 / ${data.output_tokens} 输出 tokens`
-    finishSummarySteps(data.prompt)
     ElMessage.success('摘要已生成')
   } catch (error) {
-    failSummarySteps()
+    failSummarySteps(getErrorMessage(error, '摘要生成失败，请检查 Provider 配置'))
     ElMessage.error(getErrorMessage(error, '摘要生成失败，请检查 Provider 配置'))
   } finally {
-    summaryRunning.value = false
+    if (summaryActiveArticleId.value === articleId) {
+      summaryRunning.value = false
+      summaryActiveArticleId.value = null
+    }
   }
 }
 
-function startSummarySteps() {
-  stopSummaryStepTimer()
-  summaryStepsExpanded.value = true
-  summaryStepCursor.value = 0
-  summaryStepItems.value = []
-  appendNextSummaryStep()
-  summaryStepTimer.value = window.setInterval(appendNextSummaryStep, 1500)
+function handleSummaryStreamEvent(event: SummaryStreamEvent) {
+  if (event.type === 'result' && event.result) {
+    aiResult.value = event.result.result
+    summaryUsage.value = `${event.result.input_tokens} 输入 / ${event.result.output_tokens} 输出 tokens`
+    markSummaryStepsDone()
+    return
+  }
+  if (event.type === 'done') {
+    markSummaryStepsDone()
+    summaryStepsExpanded.value = false
+    return
+  }
+  if (event.type === 'error') {
+    failSummarySteps(event.detail || '摘要生成失败，请检查 Provider 配置、Ollama 服务或网络连接后重试。')
+    return
+  }
+  appendSummaryStep(event)
 }
 
-function baseSummarySteps() {
-  return [
-    { title: '读取文章上下文', detail: '整理标题、订阅源、正文和摘要配置。' },
-    { title: '检查模型与 Provider', detail: '使用当前选择的本地或远程模型服务。' },
-    { title: '评估上下文预算', detail: '判断是否需要长文分块和多轮压缩。' },
-    { title: '提取事实笔记', detail: '保留主旨、事实、数字、风险和不确定性。' },
-    { title: '合成最终摘要', detail: '去重、自检并生成面向阅读者的摘要。' }
-  ]
+function appendSummaryStep(event: SummaryStreamEvent) {
+  const now = Date.now()
+  summaryStepItems.value = summaryStepItems.value.map((step) => (
+    step.status === 'active'
+      ? { ...step, status: 'done' as const, elapsedMs: now - step.startedAt }
+      : step
+  ))
+  summaryStepItems.value.push({
+    id: `${event.type}-${summaryStepItems.value.length}-${now}`,
+    title: event.title || summaryEventTitle(event.type),
+    detail: event.detail || summaryEventDetail(event),
+    status: 'active',
+    startedAt: now,
+    eventType: event.type
+  })
 }
 
-function appendNextSummaryStep() {
-  const steps = baseSummarySteps()
-  if (summaryStepCursor.value >= steps.length) return
-  summaryStepItems.value = summaryStepItems.value.map((step) => ({ ...step, status: 'done' }))
-  summaryStepItems.value.push({ ...steps[summaryStepCursor.value], status: 'active' })
-  summaryStepCursor.value += 1
+function markSummaryStepsDone() {
+  const now = Date.now()
+  summaryStepItems.value = summaryStepItems.value.map((step) => (
+    step.status === 'active'
+      ? { ...step, status: 'done' as const, elapsedMs: now - step.startedAt }
+      : step
+  ))
 }
 
-function finishSummarySteps(prompt: string) {
-  stopSummaryStepTimer()
-  summaryStepItems.value = extractSummaryTraceSteps(prompt)
-  summaryStepsExpanded.value = false
-}
-
-function failSummarySteps() {
-  stopSummaryStepTimer()
+function failSummarySteps(detail: string) {
+  const now = Date.now()
   summaryStepItems.value = [
-    ...summaryStepItems.value.map((step) => ({ ...step, status: 'done' as const })),
-    { title: '生成失败', detail: '请检查 Provider 配置、Ollama 服务或网络连接后重试。', status: 'error' }
-  ]
-  summaryStepsExpanded.value = true
-}
-
-function stopSummaryStepTimer() {
-  if (summaryStepTimer.value !== null) {
-    window.clearInterval(summaryStepTimer.value)
-    summaryStepTimer.value = null
-  }
-}
-
-function extractSummaryTraceSteps(prompt: string): SummaryThoughtStep[] {
-  if (!prompt.includes('多轮上下文摘要流程')) {
-    return [
-      { title: '读取文章上下文', detail: '已整理文章标题、订阅源和正文内容。', status: 'done' },
-      { title: '单轮摘要', detail: '文章未超过当前上下文预算，直接调用模型生成摘要。', status: 'done' },
-      { title: '自检并完成', detail: '已清理模型输出并记录本次 token 用量。', status: 'done' }
-    ]
-  }
-
-  const sourceTokens = prompt.match(/source_tokens≈(\d+)/)?.[1]
-  const chunks = prompt.match(/chunks=(\d+)/)?.[1]
-  const compactRounds = new Set([...prompt.matchAll(/\[compact r(\d+)/g)].map((match) => match[1]))
-  const steps: SummaryThoughtStep[] = [
+    ...summaryStepItems.value.map((step) => (
+      step.status === 'active'
+        ? { ...step, status: 'done' as const, elapsedMs: now - step.startedAt }
+        : step
+    )),
     {
-      title: '评估长文上下文',
-      detail: `正文约 ${sourceTokens ?? '若干'} tokens，超过单轮预算，进入多轮摘要。`,
-      status: 'done'
-    },
-    {
-      title: '切分文章片段',
-      detail: `已切成 ${chunks ?? prompt.match(/\[chunk /g)?.length ?? '多个'} 个 chunk，逐段提取事实笔记。`,
-      status: 'done'
-    },
-    {
-      title: '提取事实笔记',
-      detail: '每个片段单独保留主旨、事实、数字、风险、争议和不确定性。',
-      status: 'done'
+      id: `error-${now}`,
+      title: '生成失败',
+      detail,
+      status: 'error',
+      startedAt: now,
+      eventType: 'error'
     }
   ]
-  if (compactRounds.size > 0) {
-    steps.push({
-      title: '压缩中间笔记',
-      detail: `中间笔记仍偏长，已执行 ${compactRounds.size} 轮 compaction。`,
-      status: 'done'
-    })
+  summaryStepsExpanded.value = true
+}
+
+function summaryEventTitle(type: string) {
+  const titles: Record<string, string> = {
+    prepare: '读取文章上下文',
+    budget: '评估上下文预算',
+    chunk_plan: '切分长文上下文',
+    chunk_start: '提取片段事实',
+    chunk_done: '片段事实完成',
+    compact_plan: '规划上下文压缩',
+    compact_start: '压缩中间笔记',
+    compact_done: '中间笔记压缩完成',
+    final_start: '合成最终摘要',
+    final_done: '最终摘要完成',
+    save_start: '保存摘要结果',
+    save_done: '摘要结果已保存',
+    cache_hit: '读取已有摘要'
   }
-  steps.push({
-    title: '合成最终摘要',
-    detail: '已完成 final merge，去重、自检并生成最终摘要。',
-    status: 'done'
-  })
-  return steps
+  return titles[type] || '处理摘要任务'
+}
+
+function summaryEventDetail(event: SummaryStreamEvent) {
+  if (event.usage) return `${event.usage.input_tokens} 输入 / ${event.usage.output_tokens} 输出 tokens`
+  if (event.estimated_tokens && event.input_budget) return `约 ${event.estimated_tokens} tokens，预算 ${event.input_budget} tokens。`
+  return '后端已推进到该步骤。'
+}
+
+function formatElapsed(value: number) {
+  if (value < 1000) return `${value}ms`
+  return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`
 }
 
 async function runTranslate() {
@@ -1327,10 +1343,12 @@ function exportNote() {
 
 .summary-thought-panel {
   max-width: 860px;
-  margin: 18px auto 0;
-  padding: 16px 18px;
+  margin: 20px auto 0;
+  padding: 16px 18px 14px;
   border: 1px solid color-mix(in srgb, var(--app-border) 84%, transparent 16%);
-  background: color-mix(in srgb, var(--app-surface-strong) 64%, var(--app-surface) 36%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-surface-strong) 78%, var(--app-bg) 22%);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--app-text) 5%, transparent 95%);
 }
 
 .summary-thought-header,
@@ -1343,29 +1361,45 @@ function exportNote() {
 
 .summary-thought-title-group {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
 .summary-thought-kicker {
-  color: var(--el-text-color-secondary);
+  color: color-mix(in srgb, var(--theme-accent) 78%, var(--app-text) 22%);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
+.summary-thought-title-group strong {
+  color: var(--app-text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.summary-thought-title-group small {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.summary-thought-toggle {
+  flex: 0 0 auto;
+}
+
 .summary-thought-stream {
   display: grid;
   gap: 0;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .summary-thought-item {
   position: relative;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 12px;
-  min-height: 48px;
-  padding: 0 0 12px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 50px;
+  padding: 0 0 14px;
   color: var(--el-text-color-secondary);
 }
 
@@ -1376,8 +1410,8 @@ function exportNote() {
 
 .summary-thought-line {
   position: absolute;
-  left: 5px;
-  top: 18px;
+  left: 6px;
+  top: 19px;
   bottom: 0;
   width: 1px;
   background: color-mix(in srgb, var(--app-border) 70%, transparent 30%);
@@ -1390,9 +1424,9 @@ function exportNote() {
 .summary-thought-dot {
   position: relative;
   z-index: 1;
-  width: 11px;
-  height: 11px;
-  margin-top: 4px;
+  width: 13px;
+  height: 13px;
+  margin-top: 3px;
   border-radius: 50%;
   border: 1px solid color-mix(in srgb, var(--theme-accent) 34%, var(--app-border) 66%);
   background: var(--app-surface);
@@ -1400,11 +1434,31 @@ function exportNote() {
 
 .summary-thought-copy {
   display: grid;
-  gap: 3px;
+  gap: 5px;
+  min-width: 0;
 }
 
-.summary-thought-copy strong {
+.summary-thought-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.summary-thought-row strong {
+  min-width: 0;
+  color: inherit;
   font-size: 13px;
+  line-height: 1.35;
+}
+
+.summary-thought-time {
+  flex: 0 0 auto;
+  color: var(--el-text-color-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .summary-thought-item.done,
@@ -1413,7 +1467,7 @@ function exportNote() {
 }
 
 .summary-thought-item.done .summary-thought-dot {
-  background: color-mix(in srgb, var(--theme-accent) 78%, white 22%);
+  background: color-mix(in srgb, var(--theme-accent) 70%, var(--app-surface) 30%);
   border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--app-border) 28%);
 }
 
@@ -1435,7 +1489,7 @@ function exportNote() {
 
 .summary-thought-item p {
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.55;
   font-size: 13px;
 }
 
