@@ -297,30 +297,31 @@
         <div class="article-reading-surface">
           <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
         </div>
-        <div v-if="summaryRunning || summaryStepItems.length" class="summary-progress-card">
-          <div class="summary-progress-header">
-            <div>
-              <strong>摘要生成步骤</strong>
-              <span class="summary-progress-status">{{ summaryRunning ? '运行中' : '已完成' }}</span>
+        <div v-if="summaryRunning || (summaryStepsExpanded && summaryStepItems.length)" class="summary-thought-panel">
+          <div class="summary-thought-header">
+            <div class="summary-thought-title-group">
+              <span class="summary-thought-kicker">{{ summaryRunning ? '生成中' : '生成记录' }}</span>
+              <strong>{{ summaryRunning ? 'AI 正在阅读并组织摘要' : '摘要生成过程' }}</strong>
             </div>
-            <el-button v-if="!summaryRunning" size="small" text @click="summaryStepsExpanded = !summaryStepsExpanded">
-              {{ summaryStepsExpanded ? '收起步骤' : '查看生成步骤' }}
+            <el-button v-if="!summaryRunning" size="small" text @click="summaryStepsExpanded = false">
+              收起
             </el-button>
           </div>
-          <div v-if="summaryRunning || summaryStepsExpanded" class="summary-step-list">
+          <transition-group name="summary-stream" tag="div" class="summary-thought-stream">
             <div
               v-for="(step, index) in summaryStepItems"
               :key="`${step.title}-${index}`"
-              class="summary-step-item"
-              :class="{ active: summaryRunning && index === summaryActiveStep, done: !summaryRunning || index < summaryActiveStep }"
+              class="summary-thought-item"
+              :class="step.status"
             >
-              <span class="summary-step-dot"></span>
-              <div>
+              <span class="summary-thought-line"></span>
+              <span class="summary-thought-dot"></span>
+              <div class="summary-thought-copy">
                 <strong>{{ step.title }}</strong>
                 <p>{{ step.detail }}</p>
               </div>
             </div>
-          </div>
+          </transition-group>
         </div>
         <el-alert v-if="aiResult" type="success" show-icon :closable="false" class="summary-result-alert">
           <template #title>
@@ -329,7 +330,7 @@
               <div class="summary-result-actions">
                 <span v-if="summaryUsage" class="summary-usage">{{ summaryUsage }}</span>
                 <el-button v-if="summaryStepItems.length" size="small" text @click="summaryStepsExpanded = !summaryStepsExpanded">
-                  {{ summaryStepsExpanded ? '收起步骤' : '查看生成步骤' }}
+                  {{ summaryStepsExpanded ? '收起思考过程' : '查看思考过程' }}
                 </el-button>
               </div>
             </div>
@@ -389,9 +390,9 @@ const note = ref('')
 const aiResult = ref('')
 const summaryUsage = ref('')
 const summaryRunning = ref(false)
-const summaryActiveStep = ref(0)
 const summaryStepsExpanded = ref(false)
 const summaryStepTimer = ref<number | null>(null)
+const summaryStepCursor = ref(0)
 const summaryProviders = ref<LLMProvider[]>([])
 const summaryProviderId = ref<number | null>(null)
 const summaryMode = ref<'brief' | 'structured' | 'deep'>('structured')
@@ -406,7 +407,13 @@ const summaryLanguageOptions = [
   { label: '中文', value: 'zh' },
   { label: 'EN', value: 'en' }
 ]
-const summaryStepItems = ref<Array<{ title: string; detail: string }>>([])
+type SummaryThoughtStep = {
+  title: string
+  detail: string
+  status: 'active' | 'done' | 'error'
+}
+
+const summaryStepItems = ref<SummaryThoughtStep[]>([])
 const articleBodyRef = ref<HTMLElement | null>(null)
 const exportingMarkdown = ref(false)
 const feedManagerOpen = ref(false)
@@ -891,7 +898,7 @@ function clearSummaryResult() {
   aiResult.value = ''
   summaryUsage.value = ''
   summaryStepItems.value = []
-  summaryActiveStep.value = 0
+  summaryStepCursor.value = 0
   summaryStepsExpanded.value = false
   stopSummaryStepTimer()
 }
@@ -923,33 +930,41 @@ async function runSummary() {
 function startSummarySteps() {
   stopSummaryStepTimer()
   summaryStepsExpanded.value = true
-  summaryActiveStep.value = 0
-  summaryStepItems.value = [
+  summaryStepCursor.value = 0
+  summaryStepItems.value = []
+  appendNextSummaryStep()
+  summaryStepTimer.value = window.setInterval(appendNextSummaryStep, 1500)
+}
+
+function baseSummarySteps() {
+  return [
     { title: '读取文章上下文', detail: '整理标题、订阅源、正文和摘要配置。' },
     { title: '检查模型与 Provider', detail: '使用当前选择的本地或远程模型服务。' },
     { title: '评估上下文预算', detail: '判断是否需要长文分块和多轮压缩。' },
     { title: '提取事实笔记', detail: '保留主旨、事实、数字、风险和不确定性。' },
     { title: '合成最终摘要', detail: '去重、自检并生成面向阅读者的摘要。' }
   ]
-  summaryStepTimer.value = window.setInterval(() => {
-    if (summaryActiveStep.value < summaryStepItems.value.length - 1) {
-      summaryActiveStep.value += 1
-    }
-  }, 1800)
+}
+
+function appendNextSummaryStep() {
+  const steps = baseSummarySteps()
+  if (summaryStepCursor.value >= steps.length) return
+  summaryStepItems.value = summaryStepItems.value.map((step) => ({ ...step, status: 'done' }))
+  summaryStepItems.value.push({ ...steps[summaryStepCursor.value], status: 'active' })
+  summaryStepCursor.value += 1
 }
 
 function finishSummarySteps(prompt: string) {
   stopSummaryStepTimer()
   summaryStepItems.value = extractSummaryTraceSteps(prompt)
-  summaryActiveStep.value = summaryStepItems.value.length
   summaryStepsExpanded.value = false
 }
 
 function failSummarySteps() {
   stopSummaryStepTimer()
   summaryStepItems.value = [
-    ...summaryStepItems.value,
-    { title: '生成失败', detail: '请检查 Provider 配置、Ollama 服务或网络连接后重试。' }
+    ...summaryStepItems.value.map((step) => ({ ...step, status: 'done' as const })),
+    { title: '生成失败', detail: '请检查 Provider 配置、Ollama 服务或网络连接后重试。', status: 'error' }
   ]
   summaryStepsExpanded.value = true
 }
@@ -961,41 +976,46 @@ function stopSummaryStepTimer() {
   }
 }
 
-function extractSummaryTraceSteps(prompt: string) {
+function extractSummaryTraceSteps(prompt: string): SummaryThoughtStep[] {
   if (!prompt.includes('多轮上下文摘要流程')) {
     return [
-      { title: '读取文章上下文', detail: '已整理文章标题、订阅源和正文内容。' },
-      { title: '单轮摘要', detail: '文章未超过当前上下文预算，直接调用模型生成摘要。' },
-      { title: '自检并完成', detail: '已清理模型输出并记录本次 token 用量。' }
+      { title: '读取文章上下文', detail: '已整理文章标题、订阅源和正文内容。', status: 'done' },
+      { title: '单轮摘要', detail: '文章未超过当前上下文预算，直接调用模型生成摘要。', status: 'done' },
+      { title: '自检并完成', detail: '已清理模型输出并记录本次 token 用量。', status: 'done' }
     ]
   }
 
   const sourceTokens = prompt.match(/source_tokens≈(\d+)/)?.[1]
   const chunks = prompt.match(/chunks=(\d+)/)?.[1]
   const compactRounds = new Set([...prompt.matchAll(/\[compact r(\d+)/g)].map((match) => match[1]))
-  const steps = [
+  const steps: SummaryThoughtStep[] = [
     {
       title: '评估长文上下文',
-      detail: `正文约 ${sourceTokens ?? '若干'} tokens，超过单轮预算，进入多轮摘要。`
+      detail: `正文约 ${sourceTokens ?? '若干'} tokens，超过单轮预算，进入多轮摘要。`,
+      status: 'done'
     },
     {
       title: '切分文章片段',
-      detail: `已切成 ${chunks ?? prompt.match(/\[chunk /g)?.length ?? '多个'} 个 chunk，逐段提取事实笔记。`
+      detail: `已切成 ${chunks ?? prompt.match(/\[chunk /g)?.length ?? '多个'} 个 chunk，逐段提取事实笔记。`,
+      status: 'done'
     },
     {
       title: '提取事实笔记',
-      detail: '每个片段单独保留主旨、事实、数字、风险、争议和不确定性。'
+      detail: '每个片段单独保留主旨、事实、数字、风险、争议和不确定性。',
+      status: 'done'
     }
   ]
   if (compactRounds.size > 0) {
     steps.push({
       title: '压缩中间笔记',
-      detail: `中间笔记仍偏长，已执行 ${compactRounds.size} 轮 compaction。`
+      detail: `中间笔记仍偏长，已执行 ${compactRounds.size} 轮 compaction。`,
+      status: 'done'
     })
   }
   steps.push({
     title: '合成最终摘要',
-    detail: '已完成 final merge，去重、自检并生成最终摘要。'
+    detail: '已完成 final merge，去重、自检并生成最终摘要。',
+    status: 'done'
   })
   return steps
 }
@@ -1305,14 +1325,15 @@ function exportNote() {
   margin: 18px 0 0;
 }
 
-.summary-progress-card {
-  margin: 18px 0 0;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--theme-accent) 24%, var(--app-border) 76%);
-  background: color-mix(in srgb, var(--theme-accent) 8%, var(--app-surface) 92%);
+.summary-thought-panel {
+  max-width: 860px;
+  margin: 18px auto 0;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 84%, transparent 16%);
+  background: color-mix(in srgb, var(--app-surface-strong) 64%, var(--app-surface) 36%);
 }
 
-.summary-progress-header,
+.summary-thought-header,
 .summary-result-actions {
   display: flex;
   align-items: center;
@@ -1320,53 +1341,121 @@ function exportNote() {
   gap: 12px;
 }
 
-.summary-progress-status {
-  margin-left: 8px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.summary-step-list {
+.summary-thought-title-group {
   display: grid;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 3px;
 }
 
-.summary-step-item {
+.summary-thought-kicker {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.summary-thought-stream {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 10px;
+  gap: 0;
+  margin-top: 14px;
+}
+
+.summary-thought-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 0 12px;
   color: var(--el-text-color-secondary);
 }
 
-.summary-step-dot {
-  width: 9px;
-  height: 9px;
-  margin-top: 5px;
+.summary-thought-item:last-child {
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.summary-thought-line {
+  position: absolute;
+  left: 5px;
+  top: 18px;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--app-border) 70%, transparent 30%);
+}
+
+.summary-thought-item:last-child .summary-thought-line {
+  display: none;
+}
+
+.summary-thought-dot {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 4px;
   border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--theme-accent) 45%, var(--app-border) 55%);
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 34%, var(--app-border) 66%);
   background: var(--app-surface);
 }
 
-.summary-step-item.done,
-.summary-step-item.active {
+.summary-thought-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.summary-thought-copy strong {
+  font-size: 13px;
+}
+
+.summary-thought-item.done,
+.summary-thought-item.active {
   color: var(--app-text);
 }
 
-.summary-step-item.done .summary-step-dot {
+.summary-thought-item.done .summary-thought-dot {
+  background: color-mix(in srgb, var(--theme-accent) 78%, white 22%);
+  border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--app-border) 28%);
+}
+
+.summary-thought-item.active .summary-thought-dot {
   background: var(--theme-accent);
   border-color: var(--theme-accent);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--theme-accent) 14%, transparent 86%);
+  animation: summary-thinking-pulse 1.45s ease-in-out infinite;
 }
 
-.summary-step-item.active .summary-step-dot {
-  background: var(--theme-accent);
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--theme-accent) 16%, transparent 84%);
+.summary-thought-item.error .summary-thought-dot {
+  background: var(--el-color-danger);
+  border-color: var(--el-color-danger);
 }
 
-.summary-step-item p {
-  margin: 2px 0 0;
+.summary-thought-item.error {
+  color: var(--el-color-danger);
+}
+
+.summary-thought-item p {
+  margin: 0;
   line-height: 1.5;
+  font-size: 13px;
+}
+
+.summary-stream-enter-active {
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.summary-stream-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@keyframes summary-thinking-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--theme-accent) 12%, transparent 88%);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--theme-accent) 4%, transparent 96%);
+  }
 }
 
 .summary-popover-body {
