@@ -17,8 +17,19 @@
 - 从文章标题、`cleaned_markdown`、`cleaned_html`、`raw_html`、RSS `summary` 中构造摘要输入。
 - 优先使用清洗后的 Markdown，避免把 HTML 标签直接喂给模型。
 - 对超长正文做 12000 字符截断，避免一次请求过大。
-- 统一输出中文结构化摘要：一句话概览、关键要点、关键词。
+- 支持 `brief`、`structured`、`deep` 三种摘要模式。
+- 支持中文 / 英文输出和 120-1200 词长度预算。
+- Prompt 参考 coding agent 的工作方式：先理解输入约束，再提取事实，最后自检是否忠于原文。
+- 输出增加 `可信度：高/中/低`，用于提醒正文是否充分。
+- 对 Qwen3 常见的 `<think>...</think>` 或 `最终答案：` 前缀做清洗，避免内部推理泄露到阅读页。
+- 对 Ollama + Qwen3 通过 OpenAI-compatible API 调用时传入 `reasoning_effort: "none"`，避免模型把输出放入 `reasoning` 字段而 `content` 为空。
 - 调用失败时将连接失败、鉴权失败、模型不存在等错误转成可读提示。
+
+参考资料：
+
+- Anthropic Engineering, Building effective agents: https://www.anthropic.com/engineering/building-effective-agents
+- OpenAI Agents SDK 文档：Agents / Guardrails / Tracing / Usage 等模块，https://openai.github.io/openai-agents-python/
+- Ollama Qwen3 模型页：`qwen3:8b` 为 5.2GB、40K context，https://ollama.com/library/qwen3
 
 ### 2. Provider 抽象与配置
 
@@ -113,6 +124,7 @@ http://127.0.0.1:11434/v1
 
 - 摘要按钮改为 provider 下拉菜单。
 - 可选择默认 provider 或指定 provider 生成摘要。
+- 可在摘要下拉中选择摘要模式、输出语言和长度预算。
 - 摘要结果展示在文章正文下方。
 - 展示本次调用的输入 / 输出 token。
 
@@ -155,7 +167,7 @@ PYTHONPATH=backend /Users/a1234/.cache/codex-runtimes/codex-primary-runtime/depe
 结果：
 
 ```text
-Ran 22 tests in 0.036s
+Ran 24 tests
 OK
 ```
 
@@ -164,6 +176,8 @@ OK
 - `backend/tests/test_summary_agent.py`
   - 验证 Summary Agent 优先使用清洗后的 Markdown。
   - 验证 OpenAI-compatible 调用、模型名传递和 usage 读取。
+  - 验证 agentic workflow prompt、模式 token 上限和 Qwen `<think>` 清洗。
+  - 验证 Ollama provider 会携带 `reasoning_effort: "none"`。
 - `backend/tests/test_llm_provider_repository.py`
   - 验证 provider CRUD。
   - 验证默认 provider。
@@ -244,6 +258,154 @@ https://hnrss.org/frontpage
 }
 ```
 
+### Ollama + qwen3:8b 真实本地模型测试
+
+用户补充要求本机必须使用 Ollama 部署 `qwen3:8b` 并完成真实 summary，因此本轮又执行了完整本地模型测试。
+
+模型安装与拉取：
+
+```bash
+brew install ollama
+OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 ollama serve
+ollama pull qwen3:8b
+ollama list
+```
+
+确认模型已下载：
+
+```text
+NAME        ID              SIZE      MODIFIED
+qwen3:8b    500a1f067a9f    5.2 GB    14 seconds ago
+```
+
+Homebrew formula 版 `ollama 0.30.7` 可以下载模型，但本机第一次推理时报错：
+
+```text
+error starting llama-server: llama-server binary not found
+```
+
+解决方式：
+
+```bash
+brew install --cask ollama-app
+OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 /Applications/Ollama.app/Contents/Resources/ollama serve
+```
+
+原因：当前 Homebrew formula 安装目录中只有 `mlx_metal_v3/libmlxc.dylib`，缺少 GGUF 推理需要的 `llama-server`；官方 App 包含完整运行时。为了不破坏用户现有命令路径，本次测试直接使用 App 内置二进制。
+
+最小模型验证：
+
+```bash
+curl http://127.0.0.1:11434/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "qwen3:8b",
+    "messages": [
+      {"role": "system", "content": "只输出最终答案，不输出思考过程。"},
+      {"role": "user", "content": "用中文一句话总结：RSS 阅读器可以订阅文章，并用本地大模型生成摘要。"}
+    ],
+    "temperature": 0.2,
+    "max_tokens": 180,
+    "reasoning_effort": "none"
+  }'
+```
+
+返回：
+
+```text
+RSS阅读器可通过订阅文章并利用本地大模型生成摘要来提升阅读效率。
+```
+
+RSSReader 端到端测试使用临时数据库，避免污染用户现有 Electron 数据：
+
+```bash
+RSSREADER_DB_PATH=/tmp/rssreader-ollama-qwen3.db \
+PYTHONPATH=backend \
+/Users/a1234/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
+  -m uvicorn app.main:app --host 127.0.0.1 --port 18080
+```
+
+实际订阅并同步的 RSS：
+
+- `https://hnrss.org/frontpage`
+- `https://feeds.bbci.co.uk/news/technology/rss.xml`
+- `https://hnrss.org/newest?q=AI`
+
+实际创建的 provider：
+
+```json
+{
+  "name": "Local Ollama Qwen3 8B",
+  "provider_type": "ollama",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "api_key": "ollama",
+  "model": "qwen3:8b",
+  "enabled": true,
+  "is_default": true
+}
+```
+
+测试文章：
+
+```text
+BBC Technology / Article ID 23
+Version of AI tool 'too powerful for public' released to public
+```
+
+摘要请求：
+
+```bash
+curl -X POST http://127.0.0.1:18080/api/ai/summary/23 \
+  -H 'content-type: application/json' \
+  -d '{"refresh":true,"mode":"structured","language":"zh","max_words":450}'
+```
+
+实际返回摘要片段：
+
+```text
+## 一句话概览
+Anthropic 的 Claude Mythos 的最新版本 Claude Fable 5 已向公众发布，引发科技、金融和政府领域的关注。
+
+## 关键要点
+- Claude Fable 5 是 Anthropic 公司推出的 AI 工具，被认为是“过于强大”而曾被限制公开的版本。
+- 该 AI 工具在技术、金融和政府领域引起了广泛讨论，因其潜在能力引发担忧。
+- 公众发布后，可能对社会、经济和安全带来深远影响，但具体细节未在文中详述。
+- 文章未提供关于 Claude Fable 5 的具体功能、性能数据或用户反馈等详细信息。
+
+可信度：中
+```
+
+验收点：
+
+- 使用的是真实本地 Ollama `qwen3:8b`，不是 mock server。
+- 结果保存到 `ai_results`。
+- `prompt` 中包含 agentic workflow。
+- 输出没有泄露 `<think>`。
+- 统计记录为 `348` input tokens / `194` output tokens。
+
+统计接口结果：
+
+```json
+{
+  "total_articles": 61,
+  "total_calls": 1,
+  "input_tokens": 348,
+  "output_tokens": 194,
+  "by_feature": [
+    { "name": "summary", "calls": 1, "tokens": 542 }
+  ],
+  "by_provider": [
+    {
+      "provider": "Local Ollama Qwen3 8B",
+      "model": "qwen3:8b",
+      "calls": 1,
+      "input_tokens": 348,
+      "output_tokens": 194
+    }
+  ]
+}
+```
+
 ## 遇到的问题与解决
 
 ### 1. 上游仓库地址修正
@@ -311,14 +473,39 @@ FastAPI Web 开发常用 `8000`，vLLM 示例也常用 `8000`。
 - 前端 vLLM 模板默认改为 `http://127.0.0.1:8001/v1`。
 - 文档说明如无端口冲突也可手动改为 `8000/v1`。
 
+### 6. Ollama Homebrew formula 缺少 llama-server
+
+本机 `brew install ollama` 安装的 formula 版可以启动 HTTP API 和下载模型，但真实调用 `qwen3:8b` 时返回：
+
+```text
+error starting llama-server: llama-server binary not found
+```
+
+解决方式：
+
+- 安装官方 App cask：`brew install --cask ollama-app`。
+- 直接使用 `/Applications/Ollama.app/Contents/Resources/ollama serve` 启动完整运行时。
+- RSSReader 的 provider 仍使用标准 OpenAI-compatible 地址 `http://127.0.0.1:11434/v1`，应用代码不需要改特殊路径。
+
+### 7. Qwen3 reasoning 字段兼容
+
+第一次直接调用 Ollama OpenAI-compatible 接口时，Qwen3 将思考过程放到了响应的 `reasoning` 字段，而 `message.content` 为空，导致应用会认为模型返回空摘要。
+
+解决方式：
+
+- Summary Agent 对 `ollama` provider 自动传入 `reasoning_effort: "none"`。
+- 同时保留 `<think>...</think>` 清洗，兼容其它 Qwen3/vLLM 输出格式。
+- 新增单元测试锁定该行为。
+
 ## 当前限制
 
-- 本次没有在本机真实加载 Qwen3-8B 权重进行推理，因为下载与运行 8B 模型依赖本机显存/内存和时间成本；已提供 ModelScope 下载与 vLLM 启动命令。
-- 软件链路已用本地 OpenAI-compatible 服务实际验证，能够证明 RSSReader 对 vLLM/Ollama/OpenAI-compatible provider 的调用、摘要保存和用量统计逻辑可用。
+- 已在本机通过 Ollama 官方 App 运行真实 `qwen3:8b` 完成摘要测试。
+- vLLM 路线已完成配置模板和 OpenAI-compatible 链路测试，但未在本机再额外启动 vLLM 加载 ModelScope 权重。
+- HN RSS 多数条目正文只有原文链接、评论链接、分数和评论数；Summary Agent 会识别信息不足并降低可信度。真实正文更完整的源建议优先使用 BBC、OpenAI News 等提供摘要或正文的 RSS。
 - RAG 问答配置仍沿用原有模块，本次只完成 Summary Agent 相关 provider 和统计。
 
 ## 后续建议
 
-- 在具备 GPU 或足够内存的机器上运行真实 `Qwen/Qwen3-8B` vLLM 服务，执行同样的 Electron 摘要测试。
+- 如果课程演示需要 vLLM 路线，也可以在具备 GPU 或足够内存的机器上运行真实 `Qwen/Qwen3-8B` vLLM 服务，执行同样的摘要测试。
 - 后续 Translation Agent 可以复用本次 `llm_providers` 表和 provider 调用逻辑。
 - 可增加 provider “测试连接”按钮，保存前检查 `/v1/models` 或执行一次轻量 chat completion。
