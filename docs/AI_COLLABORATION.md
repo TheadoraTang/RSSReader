@@ -223,9 +223,11 @@
 
 - 使用 AI Coding Agent 完成 Week16 Summary Agent 模块，接入 `llm_providers` 配置、OpenAI-compatible Chat Completions、vLLM/Ollama/OpenAI-compatible provider 模板和摘要用量统计。
 - 继续强化 Summary Agent：摘要请求支持 `brief`、`structured`、`deep` 三种模式，支持中文/英文输出和长度预算；prompt 参考 coding agent workflow，要求先理解约束、提取事实、再自检忠实性，并输出可信度。
+- 根据“类似 opencode 的 agent 强化”反馈，补充长文上下文循环：短文单轮摘要，长文自动按 token budget 切块，逐块生成事实笔记；中间笔记超预算时继续 compaction；最后 final merge 得到整篇文章摘要，避免只截断并总结开头。
 - 为 Qwen3 兼容增加输出清洗：移除 `<think>...</think>` 与 `最终答案：` 前缀；对 Ollama provider 自动传入 `reasoning_effort: "none"`，避免 Qwen3 通过 OpenAI-compatible API 时把内容放入 reasoning 字段而正文为空。
 - 前端阅读页的摘要下拉菜单新增 provider 选择、摘要模式、语言和长度设置；AI 设置页支持本地 vLLM Qwen3-8B、Ollama 和通用 OpenAI-compatible provider 配置。
 - 实际安装并运行 Ollama `qwen3:8b`，订阅 `https://hnrss.org/frontpage`、`https://feeds.bbci.co.uk/news/technology/rss.xml` 和 `https://hnrss.org/newest?q=AI` 后，用 BBC Technology 的真实文章执行摘要，成功写入 `ai_results` 并统计为 `348` input tokens / `194` output tokens。
+- 使用真实 Ollama `qwen3:8b` 对强制小上下文长文执行多轮摘要验证，触发 `7` 个 chunk 调用和 final merge，累计 `7737` input tokens / `2764` output tokens。
 - 排查到 Homebrew formula 版 `ollama 0.30.7` 缺少 `llama-server`，真实推理时报 `llama-server binary not found`；改用 `brew install --cask ollama-app` 后通过 `/Applications/Ollama.app/Contents/Resources/ollama serve` 启动完整运行时。
 - 当日验证：后端 `python3 -m unittest discover -s backend/tests` 通过，前端 `./node_modules/.bin/vue-tsc --noEmit --pretty false` 通过，真实 Ollama/Qwen3 API 摘要和 `/api/stats/llm` 用量聚合通过。
 - 当前限制：vLLM 模板和 OpenAI-compatible 调用链路已完成，但本次真实本地推理使用的是 Ollama `qwen3:8b`；若需要演示 vLLM 权重加载，还需要在具备足够 GPU/内存的机器上单独启动 vLLM。

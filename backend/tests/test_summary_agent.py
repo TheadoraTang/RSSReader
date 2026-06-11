@@ -29,6 +29,32 @@ class FakeOpenAI:
         self.chat = SimpleNamespace(completions=FakeOpenAI.last_chat)
 
 
+class SequencedChatCompletions:
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        content = "最终整篇摘要：覆盖所有片段。\n\n可信度：高"
+        if len(self.calls) == 1:
+            content = "片段笔记 A：开头事实。"
+        elif len(self.calls) == 2:
+            content = "片段笔记 B：结尾事实。"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            usage=SimpleNamespace(prompt_tokens=100 + len(self.calls), completion_tokens=20 + len(self.calls)),
+        )
+
+
+class SequencedOpenAI:
+    last_chat = None
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        SequencedOpenAI.last_chat = SequencedChatCompletions()
+        self.chat = SimpleNamespace(completions=SequencedOpenAI.last_chat)
+
+
 class SummaryAgentTest(unittest.TestCase):
     def test_build_article_text_prefers_cleaned_markdown(self):
         article = {
@@ -81,6 +107,43 @@ class SummaryAgentTest(unittest.TestCase):
             summarize_with_provider(article, provider)
 
         self.assertEqual(FakeOpenAI.last_chat.kwargs["reasoning_effort"], "none")
+
+    def test_long_article_runs_chunk_then_final_summary_loop(self):
+        article = {
+            "title": "Long context article",
+            "cleaned_markdown": "\n\n".join(
+                [
+                    "第一部分：" + ("开头事实 " * 120),
+                    "第二部分：" + ("结尾事实 " * 120),
+                ]
+            ),
+        }
+        provider = {
+            "name": "Local Ollama Qwen3 8B",
+            "provider_type": "ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "api_key": "ollama",
+            "model": "qwen3:8b",
+            "enabled": True,
+        }
+        options = SummaryOptions(
+            mode="structured",
+            language="zh",
+            max_words=160,
+            context_window_tokens=900,
+            chunk_token_budget=180,
+            chunk_overlap_tokens=0,
+        )
+
+        with patch("app.services.summary_agent.OpenAI", SequencedOpenAI):
+            result = summarize_with_provider(article, provider, options)
+
+        self.assertGreaterEqual(len(SequencedOpenAI.last_chat.calls), 3)
+        self.assertIn("最终整篇摘要", result.text)
+        self.assertIn("多轮上下文摘要流程", result.prompt)
+        self.assertIn("chunk 1/", result.prompt)
+        self.assertIn("final merge", result.prompt)
+        self.assertGreater(result.usage.input_tokens, 300)
 
     def test_clean_model_output_removes_qwen_thinking_blocks(self):
         text = clean_model_output("<think>分析过程</think>\n最终答案：摘要正文")

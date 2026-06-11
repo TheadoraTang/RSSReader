@@ -20,6 +20,8 @@
 - 支持 `brief`、`structured`、`deep` 三种摘要模式。
 - 支持中文 / 英文输出和 120-1200 词长度预算。
 - Prompt 参考 coding agent 的工作方式：先理解输入约束，再提取事实，最后自检是否忠于原文。
+- 针对模型上下文限制实现多轮上下文循环：先估算 token 预算，长文自动切块，每个 chunk 生成事实笔记；如果中间笔记仍超预算，再做 compaction；最后进行 final merge 得到整篇文章摘要。
+- 短文仍走单轮摘要，长文才进入 chunk summary -> compaction -> final merge，避免普通摘要请求被不必要地变慢。
 - 输出增加 `可信度：高/中/低`，用于提醒正文是否充分。
 - 对 Qwen3 常见的 `<think>...</think>` 或 `最终答案：` 前缀做清洗，避免内部推理泄露到阅读页。
 - 对 Ollama + Qwen3 通过 OpenAI-compatible API 调用时传入 `reasoning_effort: "none"`，避免模型把输出放入 `reasoning` 字段而 `content` 为空。
@@ -178,6 +180,7 @@ OK
   - 验证 OpenAI-compatible 调用、模型名传递和 usage 读取。
   - 验证 agentic workflow prompt、模式 token 上限和 Qwen `<think>` 清洗。
   - 验证 Ollama provider 会携带 `reasoning_effort: "none"`。
+  - 验证长文章会触发多轮 chunk summary + final merge，而不是简单截断开头。
 - `backend/tests/test_llm_provider_repository.py`
   - 验证 provider CRUD。
   - 验证默认 provider。
@@ -406,6 +409,53 @@ Anthropic 的 Claude Mythos 的最新版本 Claude Fable 5 已向公众发布，
 }
 ```
 
+### Ollama + qwen3:8b 多轮上下文长文测试
+
+针对“类似 opencode/coding agent 的上下文管理”需求，本轮又补充了长文摘要循环能力，并用真实 Ollama `qwen3:8b` 验证。
+
+实现策略：
+
+- 先估算 `system_prompt + user_prompt` 的 token 是否超过输入预算。
+- 未超过预算：直接单轮摘要。
+- 超过预算：正文按 token budget 切成多个 chunk，并保留少量 overlap。
+- 每个 chunk 先生成事实笔记，重点保留主旨、事实、数字、人名/机构、风险、争议、不确定性。
+- 如果所有 chunk 笔记拼接后仍超过最终合并预算，进入一轮或多轮 compaction，压缩中间笔记。
+- 最后用压缩后的整篇事实笔记做 final merge，输出用户选择模式的摘要。
+- 所有中间调用的 usage 会累加，统计页看到的是整次多轮 agent 的总消耗。
+
+真实验证方式：
+
+- 使用本地 `/Applications/Ollama.app/Contents/Resources/ollama serve`。
+- Provider: `Local Ollama Qwen3 8B`
+- Model: `qwen3:8b`
+- 构造包含三段重复事实的长文，并将 `context_window_tokens` 临时调小到 `1000`，强制触发多轮。
+
+验证结果：
+
+```text
+input_tokens 7737
+output_tokens 2764
+calls_trace_chunks 7
+has_final_merge True
+```
+
+真实输出片段：
+
+```text
+## 一句话概览
+RSSReader 的 Summary Agent 通过压缩长文章以适应上下文窗口，生成结构化摘要并评估其可信度。
+
+## 关键要点
+- Summary Agent 使用 Ollama 本地模型生成摘要，需配置 provider 支持。
+- 压缩机制用于应对上下文窗口限制，可能影响摘要完整性与可信度。
+- 摘要目标为结构化输出，包含格式、可信度依据及压缩要素。
+- 压缩过程涉及预算控制与内容精简，但具体技术细节未明确。
+
+可信度：中
+```
+
+说明：这次验证重点不是文章内容本身，而是确认本地 Qwen3 真实执行了多轮 chunk 摘要和 final merge；`calls_trace_chunks 7` 与 `has_final_merge True` 证明没有只取开头截断。
+
 ## 遇到的问题与解决
 
 ### 1. 上游仓库地址修正
@@ -497,9 +547,22 @@ error starting llama-server: llama-server binary not found
 - 同时保留 `<think>...</think>` 清洗，兼容其它 Qwen3/vLLM 输出格式。
 - 新增单元测试锁定该行为。
 
+### 8. 长文章不能只截断开头
+
+早期实现为了避免一次请求过大，对正文做 12000 字符截断。这能保证短文可用，但对长文不够像真正的 agent，因为后半篇文章会被丢掉。
+
+解决方式：
+
+- 移除默认截断作为摘要主路径。
+- 新增 token 预算估算和 chunk 切分。
+- 长文走多轮 context loop：chunk notes -> optional compaction -> final merge。
+- 在 `ai_results.prompt` 中保存多轮 trace，便于开发者排查用了多少 chunk、是否进入 final merge。
+- 新增回归测试，强制小上下文预算，确认长文至少触发多个模型调用并最终合并。
+
 ## 当前限制
 
 - 已在本机通过 Ollama 官方 App 运行真实 `qwen3:8b` 完成摘要测试。
+- 已在本机通过真实 `qwen3:8b` 验证多轮长文摘要循环，能够避免只总结文章开头。
 - vLLM 路线已完成配置模板和 OpenAI-compatible 链路测试，但未在本机再额外启动 vLLM 加载 ModelScope 权重。
 - HN RSS 多数条目正文只有原文链接、评论链接、分数和评论数；Summary Agent 会识别信息不足并降低可信度。真实正文更完整的源建议优先使用 BBC、OpenAI News 等提供摘要或正文的 RSS。
 - RAG 问答配置仍沿用原有模块，本次只完成 Summary Agent 相关 provider 和统计。

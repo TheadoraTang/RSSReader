@@ -259,7 +259,7 @@ export const rssApi = {
       max_words?: number
     }
   ) =>
-    api.post<AIResult>(`/ai/summary/${articleId}`, payload ?? {}, { timeout: 90000 }).then((res) => res.data),
+    api.post<AIResult>(`/ai/summary/${articleId}`, payload ?? {}, { timeout: 300000 }).then((res) => res.data),
   translate: (articleId: number) => api.post<AIResult>(`/ai/translate/${articleId}`).then((res) => res.data),
   suggestTags: (articleId: number) => api.post<AIResult>(`/ai/tag-suggest/${articleId}`).then((res) => res.data),
   llmProviders: () => api.get<LLMProvider[]>('/ai/providers').then((res) => res.data),

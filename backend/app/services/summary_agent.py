@@ -29,13 +29,37 @@ class SummaryOptions:
     mode: str = "structured"
     language: str = "zh"
     max_words: int = 450
+    context_window_tokens: int = 6000
+    chunk_token_budget: int = 2600
+    chunk_overlap_tokens: int = 120
+    max_rounds: int = 4
 
 
-def build_article_text(article: dict, max_chars: int = 12000) -> str:
+def build_article_text(article: dict, max_chars: int | None = None) -> str:
+    metadata = _article_metadata(article)
+    text = _article_body(article)
+    if max_chars is not None and len(text) > max_chars:
+        text = text[:max_chars].rsplit("\n", 1)[0].strip()
+    return metadata + f"\n\n正文：\n{text or '无正文，仅可基于标题生成摘要。'}"
+
+
+def _article_metadata(article: dict) -> str:
     title = article.get("title") or "Untitled"
     feed_title = article.get("feed_title") or "Unknown feed"
     published_at = article.get("published_at") or ""
     url = article.get("url") or ""
+    metadata = [
+        f"标题：{title}",
+        f"订阅源：{feed_title}",
+    ]
+    if published_at:
+        metadata.append(f"发布时间：{published_at}")
+    if url:
+        metadata.append(f"原文链接：{url}")
+    return "\n".join(metadata)
+
+
+def _article_body(article: dict) -> str:
     source = (
         article.get("cleaned_markdown")
         or article.get("cleaned_html")
@@ -45,17 +69,7 @@ def build_article_text(article: dict, max_chars: int = 12000) -> str:
     )
     text = _html_to_text(source)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    if len(text) > max_chars:
-        text = text[:max_chars].rsplit("\n", 1)[0].strip()
-    metadata = [
-        f"标题：{title}",
-        f"订阅源：{feed_title}",
-    ]
-    if published_at:
-        metadata.append(f"发布时间：{published_at}")
-    if url:
-        metadata.append(f"原文链接：{url}")
-    return "\n".join(metadata) + f"\n\n正文：\n{text or '无正文，仅可基于标题生成摘要。'}"
+    return text
 
 
 def build_summary_prompt(article: dict, options: SummaryOptions | None = None) -> tuple[str, str]:
@@ -104,23 +118,108 @@ def summarize_with_provider(
             base_url=base_url,
             timeout=60,
         )
-        request_args = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.2,
-            "max_tokens": _max_tokens_for_options(options),
-        }
-        if provider.get("provider_type") == "ollama":
-            request_args["reasoning_effort"] = "none"
-        response = client.chat.completions.create(
-            **request_args,
+        if _estimate_tokens(system_prompt + user_prompt) > _input_token_budget(options):
+            return _summarize_long_article(client, article, provider, options)
+        completion = _complete_chat(
+            client,
+            provider,
+            system_prompt,
+            user_prompt,
+            _max_tokens_for_options(options),
         )
     except Exception as exc:
         raise SummaryAgentError(_friendly_provider_error(exc, provider)) from exc
 
+    return SummaryResult(
+        text=completion.text,
+        usage=completion.usage,
+        prompt=f"{system_prompt}\n\n{user_prompt}",
+    )
+
+
+@dataclass
+class _Completion:
+    text: str
+    usage: SummaryUsage
+
+
+def _summarize_long_article(
+    client: OpenAI,
+    article: dict,
+    provider: dict,
+    options: SummaryOptions,
+) -> SummaryResult:
+    body = _article_body(article)
+    if not body:
+        system_prompt, user_prompt = build_summary_prompt(article, options)
+        completion = _complete_chat(client, provider, system_prompt, user_prompt, _max_tokens_for_options(options))
+        return SummaryResult(completion.text, completion.usage, f"{system_prompt}\n\n{user_prompt}")
+
+    chunks = _split_text_by_token_budget(body, options.chunk_token_budget, options.chunk_overlap_tokens)
+    total_usage = SummaryUsage(0, 0)
+    trace = [
+        "多轮上下文摘要流程：",
+        f"- source_tokens≈{_estimate_tokens(body)}",
+        f"- context_window_tokens={options.context_window_tokens}",
+        f"- chunk_token_budget={options.chunk_token_budget}",
+        f"- chunks={len(chunks)}",
+    ]
+    notes: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        system_prompt, user_prompt = _build_chunk_prompt(article, chunk, index, len(chunks), options)
+        completion = _complete_chat(client, provider, system_prompt, user_prompt, 650)
+        _add_usage(total_usage, completion.usage)
+        notes.append(f"片段 {index}/{len(chunks)} 笔记：\n{completion.text}")
+        trace.append(_trace_prompt(f"chunk {index}/{len(chunks)}", system_prompt, user_prompt))
+
+    notes_text = "\n\n".join(notes)
+    round_number = 1
+    while _estimate_tokens(notes_text) > _input_token_budget(options) and round_number <= options.max_rounds:
+        compressed_notes: list[str] = []
+        note_chunks = _split_text_by_token_budget(notes_text, options.chunk_token_budget, 0)
+        for index, note_chunk in enumerate(note_chunks, start=1):
+            system_prompt, user_prompt = _build_compaction_prompt(note_chunk, index, len(note_chunks), round_number, options)
+            completion = _complete_chat(client, provider, system_prompt, user_prompt, 700)
+            _add_usage(total_usage, completion.usage)
+            compressed_notes.append(f"压缩轮 {round_number} - {index}/{len(note_chunks)}：\n{completion.text}")
+            trace.append(_trace_prompt(f"compact r{round_number} {index}/{len(note_chunks)}", system_prompt, user_prompt))
+        notes_text = "\n\n".join(compressed_notes)
+        round_number += 1
+
+    if _estimate_tokens(notes_text) > _input_token_budget(options):
+        notes_text = _trim_to_token_budget(notes_text, _input_token_budget(options))
+        trace.append("- 中间笔记超过最大压缩轮数，已按 token 预算保留前部压缩笔记。")
+
+    system_prompt, user_prompt = _build_final_from_notes_prompt(article, notes_text, options)
+    completion = _complete_chat(client, provider, system_prompt, user_prompt, _max_tokens_for_options(options))
+    _add_usage(total_usage, completion.usage)
+    trace.append(_trace_prompt("final merge", system_prompt, user_prompt))
+    return SummaryResult(
+        text=completion.text,
+        usage=total_usage,
+        prompt="\n\n".join(trace),
+    )
+
+
+def _complete_chat(
+    client: OpenAI,
+    provider: dict,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+) -> _Completion:
+    request_args = {
+        "model": provider.get("model") or "",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": max_tokens,
+    }
+    if provider.get("provider_type") == "ollama":
+        request_args["reasoning_effort"] = "none"
+    response = client.chat.completions.create(**request_args)
     text = response.choices[0].message.content if response.choices else ""
     text = clean_model_output(text)
     if not text or not text.strip():
@@ -129,17 +228,170 @@ def summarize_with_provider(
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "prompt_tokens", 0) or _estimate_tokens(system_prompt + user_prompt)
     output_tokens = getattr(usage, "completion_tokens", 0) or _estimate_tokens(text)
-    return SummaryResult(
-        text=text.strip(),
-        usage=SummaryUsage(input_tokens, output_tokens),
-        prompt=f"{system_prompt}\n\n{user_prompt}",
-    )
+    return _Completion(text.strip(), SummaryUsage(input_tokens, output_tokens))
 
 
 def clean_model_output(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.I | re.S)
     text = re.sub(r"^\s*(final answer|最终答案)[:：]\s*", "", text, flags=re.I)
     return text.strip()
+
+
+def _build_chunk_prompt(
+    article: dict,
+    chunk: str,
+    index: int,
+    total: int,
+    options: SummaryOptions,
+) -> tuple[str, str]:
+    output_language = "中文" if options.language == "zh" else "English"
+    system_prompt = (
+        "你是 RSSReader 的长文摘要子任务 agent。"
+        "当前输入只是整篇文章的一个片段，你的任务是提取可复用的事实笔记，"
+        "不要写最终摘要，不要编造本片段没有的信息。"
+    )
+    user_prompt = (
+        f"{_article_metadata(article)}\n\n"
+        f"片段：{index}/{total}\n"
+        f"输出语言：{output_language}\n\n"
+        "请输出用于后续汇总的压缩笔记，格式：\n"
+        "- 本片段主旨：...\n"
+        "- 事实/数字/人名/机构：...\n"
+        "- 因果、风险或争议：...\n"
+        "- 与前后文相关的线索：...\n"
+        "- 信息不足或不确定处：...\n\n"
+        f"片段正文：\n{chunk}"
+    )
+    return system_prompt, user_prompt
+
+
+def _build_compaction_prompt(
+    notes: str,
+    index: int,
+    total: int,
+    round_number: int,
+    options: SummaryOptions,
+) -> tuple[str, str]:
+    output_language = "中文" if options.language == "zh" else "English"
+    system_prompt = (
+        "你是 RSSReader 的上下文压缩 agent。"
+        "你的任务是在保留事实覆盖面的前提下压缩中间笔记，"
+        "合并重复点，保留数字、因果、争议和不确定性。"
+    )
+    user_prompt = (
+        f"压缩轮次：{round_number}\n"
+        f"笔记分块：{index}/{total}\n"
+        f"输出语言：{output_language}\n\n"
+        "请把下面的中间笔记压缩为更短的事实清单，禁止加入新事实：\n\n"
+        f"{notes}"
+    )
+    return system_prompt, user_prompt
+
+
+def _build_final_from_notes_prompt(
+    article: dict,
+    notes: str,
+    options: SummaryOptions,
+) -> tuple[str, str]:
+    output_language = "中文" if options.language == "zh" else "English"
+    mode_instruction = _mode_instruction(options.mode)
+    system_prompt = (
+        "你是 RSSReader 的最终摘要 agent。"
+        "你会基于多个片段 agent 产生的事实笔记整合全文摘要。"
+        "必须覆盖整篇文章的主要线索，不能只总结开头；不能泄露内部推理。"
+    )
+    user_prompt = (
+        f"{_article_metadata(article)}\n\n"
+        f"摘要模式：{options.mode}\n"
+        f"输出语言：{output_language}\n"
+        f"长度上限：约 {options.max_words} 个词以内\n\n"
+        "下面是从整篇文章多轮提取并压缩后的事实笔记。"
+        "请执行最终合成：去重、按重要性排序、保留不确定性，并自检是否只使用笔记中支持的信息。\n\n"
+        f"{mode_instruction}\n"
+        "最后增加一行 `可信度：高/中/低`，反映正文信息是否充分。\n\n"
+        f"事实笔记：\n{notes}"
+    )
+    return system_prompt, user_prompt
+
+
+def _split_text_by_token_budget(text: str, token_budget: int, overlap_tokens: int) -> list[str]:
+    token_budget = max(200, token_budget)
+    overlap_tokens = max(0, min(overlap_tokens, token_budget // 3))
+    paragraphs = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
+    if not paragraphs:
+        paragraphs = [text.strip()]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_tokens = 0
+    for paragraph in paragraphs:
+        paragraph_tokens = _estimate_tokens(paragraph)
+        if paragraph_tokens > token_budget:
+            if current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_tokens = 0
+            chunks.extend(_split_large_paragraph(paragraph, token_budget, overlap_tokens))
+            continue
+
+        if current and current_tokens + paragraph_tokens > token_budget:
+            chunks.append("\n\n".join(current))
+            current = _overlap_tail(current, overlap_tokens)
+            current_tokens = _estimate_tokens("\n\n".join(current)) if current else 0
+        current.append(paragraph)
+        current_tokens += paragraph_tokens
+
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks or [text[: max(1, token_budget * 4)]]
+
+
+def _split_large_paragraph(paragraph: str, token_budget: int, overlap_tokens: int) -> list[str]:
+    chunk_chars = max(800, token_budget * 3)
+    overlap_chars = max(0, overlap_tokens * 3)
+    chunks: list[str] = []
+    start = 0
+    while start < len(paragraph):
+        end = min(len(paragraph), start + chunk_chars)
+        chunks.append(paragraph[start:end].strip())
+        if end >= len(paragraph):
+            break
+        start = max(end - overlap_chars, start + 1)
+    return [chunk for chunk in chunks if chunk]
+
+
+def _overlap_tail(paragraphs: list[str], overlap_tokens: int) -> list[str]:
+    if overlap_tokens <= 0:
+        return []
+    selected: list[str] = []
+    total = 0
+    for paragraph in reversed(paragraphs):
+        total += _estimate_tokens(paragraph)
+        selected.insert(0, paragraph)
+        if total >= overlap_tokens:
+            break
+    return selected
+
+
+def _input_token_budget(options: SummaryOptions) -> int:
+    completion_budget = _max_tokens_for_options(options)
+    return max(500, options.context_window_tokens - completion_budget - 500)
+
+
+def _trim_to_token_budget(text: str, token_budget: int) -> str:
+    if _estimate_tokens(text) <= token_budget:
+        return text
+    max_chars = max(500, token_budget * 3)
+    return text[:max_chars].rsplit("\n", 1)[0].strip() or text[:max_chars].strip()
+
+
+def _add_usage(total: SummaryUsage, usage: SummaryUsage) -> None:
+    total.input_tokens += usage.input_tokens
+    total.output_tokens += usage.output_tokens
+
+
+def _trace_prompt(label: str, system_prompt: str, user_prompt: str) -> str:
+    return f"[{label}]\n{system_prompt}\n\n{user_prompt}"
 
 
 def _html_to_text(value: str) -> str:
