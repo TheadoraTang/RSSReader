@@ -233,3 +233,13 @@
 
 - 使用 AI Coding Agent 按要求撤回 `update_docs/Week14_handingna.md` 中本次关于“添加订阅后首次同步”的周报修改。
 - 本次仅调整周报记录范围，不改变后端、前端、测试或数据库清空结果。
+
+## 2026-06-11（Week16 Summary Agent）
+
+- 使用 AI Coding Agent 协助完成朱文韬负责的 Week16 Summary Agent 后端系统。
+- 后端新增 Summary Agent、LLM Provider CRUD、OpenAI-compatible Chat Completions 调用、vLLM/Ollama provider 类型和摘要用量统计。
+- 前端 AI 设置页由“Provider 预留界面”改为真实配置管理，新增 vLLM Qwen3-8B、Ollama、OpenAI-compatible 快速模板；阅读页摘要按钮支持选择 provider 并展示输入/输出 token；统计页展示按功能和按 provider 的用量明细。
+- 实测通过本地 OpenAI-compatible 服务模拟 Qwen3-8B，验证 vLLM 与 Ollama provider 类型均可生成摘要并写入 `ai_results`。
+- 实际打开 Electron 应用验证桌面端链路：Electron 主进程启动 FastAPI 后端，前端通过 preload 注入的 `apiBaseUrl` 调用后端；实际订阅 `https://hnrss.org/frontpage` 成功同步 21 篇文章，并对真实订阅文章完成摘要生成与用量统计。
+- 新增 `update_docs/Week16_GentleCold.md`，记录功能、接口、测试、ModelScope/vLLM 与 Ollama 使用方式、遇到的问题和解决方案。
+- 当前限制：本机未真实加载 Qwen3-8B 权重推理，已提供 ModelScope 下载和 vLLM 启动命令；软件调用链路使用本地 OpenAI-compatible 测试服务完成验证。
