@@ -261,4 +261,42 @@
 - 实测通过本地 OpenAI-compatible 服务模拟 Qwen3-8B，验证 vLLM 与 Ollama provider 类型均可生成摘要并写入 `ai_results`。
 - 实际打开 Electron 应用验证桌面端链路：Electron 主进程启动 FastAPI 后端，前端通过 preload 注入的 `apiBaseUrl` 调用后端；实际订阅 `https://hnrss.org/frontpage` 成功同步 21 篇文章，并对真实订阅文章完成摘要生成与用量统计。
 - 新增 `update_docs/Week16_GentleCold.md`，记录功能、接口、测试、ModelScope/vLLM 与 Ollama 使用方式、遇到的问题和解决方案。
-- 当前限制：本机未真实加载 Qwen3-8B 权重推理，已提供 ModelScope 下载和 vLLM 启动命令；软件调用链路使用本地 OpenAI-compatible 测试服务完成验证。
+
+## 2026-06-13（Week16 AI 摘要前端展示系统）
+
+- 使用 AI Coding Agent 协助完成徐治平负责的 Week16 AI 摘要前端展示系统。
+- 将原有"正文下方平铺摘要"的方式重构为固定在第三栏底部的可折叠摘要抽屉，支持展开/收起、语言选择、生成按钮和失败重试。
+- 新增顶部透明拖拽条，抽屉展开后用户可拖拽自由调整高度；拖拽直接操作 DOM CSS 变量绕开 Vue 响应式；修复拖拽仍有延迟的问题：根本原因是 `.summary-drawer-body` 存在 `transition: height 0.35s`，拖拽开始时临时设为 `none`，mouseup 后恢复，彻底消除缓动干扰。
+- 摘要生成完成后自动弹升至第三栏高度三分之一处（仅首次生成触发）。
+- 点击"生成摘要"时若抽屉高度不足以展示步骤流，自动提升至 280px，确保步骤内容完整可见。
+- 生成期间在抽屉内展示后端真实 SSE 事件步骤流，步骤完成后自动清空，只保留渲染后的摘要富文本。
+- 标题栏生成状态改为：MagicStick 图标静止，"AI 摘要"文字固定不变，文字右侧条件渲染小转圈图标（`Loading`）；生成中按钮改为 `disabled` 禁用，移除 `el-button` 的 `:loading` 转圈动画。
+- 修复摘要 Markdown 渲染中 `renderMarkdownBlock` 标题行后直接 return 导致正文内容丢失的问题，改为递归渲染剩余行。
+- 修复后端 `_mode_instruction` 硬编码中文格式模板导致英文摘要标题仍为中文的问题，增加 `language` 参数按语言分支返回对应模板。
+- 后端 prompt 中移除"可信度：高/中/低"输出指令，前端同步加正则过滤作为保底。
+- 将语言选择从双选 `el-segmented`（仅中/英）改为下拉菜单 `el-select`，新增日语、韩语、法语、德语、西班牙语、葡萄牙语、俄语、阿拉伯语共 10 种语言，默认值通过 `navigator.language` 检测系统语言自动匹配。
+- 修复其他语言生成失败的根本原因：后端 `SummaryRequest` Pydantic 模型 `language` 字段声明为 `Literal["zh", "en"]`，导致其他语言代码在进入服务层前被 Pydantic 以 422 直接拒绝；将字段类型放宽为 `str`。
+- 后端新增 `_language_display()` 映射函数，将语言代码转为完整语言名称（如 `日本語`、`Français`）写入提示词，使模型按所选语言输出。
+- 将标题栏布局从 `flex + space-between` 改为三列 grid（`auto 1fr auto`），红字警告放入独立中间列，始终水平居中于标题栏。
+- 当日验证：前端 `vue-tsc --noEmit` 通过，手动验证多语言摘要生成、拖拽无延迟、步骤流高度自动调整、警告居中显示均符合预期。
+- 当前限制：抽屉高度未持久化，刷新后重置为默认值；拖拽仅支持鼠标，未适配触摸屏；语言修复需重启后端生效。
+
+## 2026-06-14（Week16 用量统计可视化）
+
+- 使用 AI Coding Agent 协助完成徐治平负责的 Week16 用量统计可视化模块。
+- 将原有纯文字的 LLM 用量统计面板重构为带时序柱状图的可视化面板，引入 `chart.js` 和 `vue-chartjs`。
+- 面板新增右上角折叠/展开箭头，时间跨度选择（今天 / 本周 / 本月 / 全部），右上角请求次数 / TOKEN 切换按钮，刷新按钮。
+- 摘要卡片压缩为紧凑行内样式，三列横排（总请求 / 输入 Token / 输出 Token），文字居中。
+- 柱状图优化：圆角加大、柱子变细（`barPercentage: 0.5`）、hover 加深、y 轴虚线网格、x 轴今天跨度最多显示 8 个刻度、TOKEN 模式 legend 右对齐。
+- tooltip 在请求次数为 0 时不显示；请求次数模式下 tooltip `afterBody` 附加"请求异常: N (X%)"，仅在 `failed_calls > 0` 时出现。
+- 后端 `ai_results` 表新增 `status TEXT DEFAULT 'success'` 列，通过 migration 自动补列；`create_ai_result` 新增 `status` 参数。
+- `ai_service.py` 在 `SummaryAgentError` 时写入 `status='failed'` 记录再 re-raise，不影响原有错误流程。
+- 后端新增 `GET /api/stats/llm/timeseries` 接口，支持 `range` 参数（today/week/month/all），按小时或天分桶返回时序数据，同时统计 `failed_calls`；`GET /api/stats/llm` 同步支持 `range` 过滤。
+- 修复时区问题：数据库 `CURRENT_TIMESTAMP` 存本地时间，cutoff 和分桶统一改用 `datetime.now()`（无时区），SQL 分桶表达式通过 Python 计算偏移量后以 `datetime(created_at, '+N seconds')` 转换，x 轴显示本地小时。
+- 本月跨度改为从当月 1 日到今天，不再跨月倒推 30 天。
+- 摘要生成按钮移除 `MagicStick` 图标，只保留文字。
+- 摘要步骤流 active 圆点动画改为从中心向四周扩散的波纹（`::before` 伪元素，scale 1→2.8，opacity 0.5→0，`cubic-bezier(0.4,0,0.6,1)`）；done 状态颜色变浅（accent 混合比例 70%→35%）。
+- 当日验证：前端 `vue-tsc --noEmit` 通过，手动验证时序图正确显示本地时间、折叠/展开、时间跨度切换、请求异常 tooltip 均符合预期。
+- 当前限制：时区处理依赖后端系统本地时区，若后端部署在与用户不同时区的服务器上需额外处理；请求异常统计仅覆盖摘要功能（translate/tag_suggestion 暂未接入失败记录）。
+
+

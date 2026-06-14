@@ -190,7 +190,7 @@
         </article>
       </section>
 
-      <section v-if="store.selectedArticle && !feedManagerOpen" class="panel scroll-panel reader-detail-panel">
+      <section v-if="store.selectedArticle && !feedManagerOpen" class="panel reader-detail-panel">
         <div class="toolbar detail-toolbar">
           <el-tooltip :content="store.selectedArticle.is_read ? '标记未读' : '标记已读'" placement="top">
             <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_read }" :icon="Check" circle @click="store.toggleRead(store.selectedArticle)" />
@@ -201,33 +201,6 @@
           <el-tooltip :content="store.selectedArticle.is_starred ? '取消收藏' : '收藏'" placement="top">
             <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_starred }" :icon="Star" circle @click="store.toggleStar(store.selectedArticle)" />
           </el-tooltip>
-          <el-popover placement="bottom" :width="320" trigger="click" popper-class="summary-popover">
-            <template #reference>
-              <el-button class="toolbar-icon-button" :loading="summaryRunning" :icon="MagicStick" circle aria-label="AI 摘要" />
-            </template>
-            <div class="summary-popover-body">
-              <label class="dropdown-inline-label">Provider</label>
-              <el-select v-model="summaryProviderId" size="small" placeholder="默认 Provider" style="width: 100%">
-                <el-option label="默认 Provider" :value="null" />
-                <el-option
-                  v-for="provider in summaryProviders"
-                  :key="provider.id"
-                  :label="`${provider.is_default ? '✓ ' : ''}${provider.name} · ${provider.model}`"
-                  :value="provider.id"
-                  :disabled="!provider.enabled"
-                />
-              </el-select>
-              <label class="dropdown-inline-label">摘要模式</label>
-              <el-segmented v-model="summaryMode" :options="summaryModeOptions" size="small" />
-              <label class="dropdown-inline-label">语言</label>
-              <el-segmented v-model="summaryLanguage" :options="summaryLanguageOptions" size="small" />
-              <label class="dropdown-inline-label">长度</label>
-              <el-input-number v-model="summaryMaxWords" :min="120" :max="1200" :step="60" size="small" style="width: 100%" />
-              <el-button type="primary" :icon="MagicStick" :loading="summaryRunning" class="summary-generate-button" @click="runSummary">
-                生成摘要
-              </el-button>
-            </div>
-          </el-popover>
           <el-popover placement="bottom" :width="320" trigger="click" popper-class="tag-popover">
             <template #reference>
               <el-button class="toolbar-icon-button" :icon="CollectionTag" circle aria-label="标签" title="标签" />
@@ -279,77 +252,94 @@
           </el-dropdown>
         </div>
 
-        <header class="reader-hero">
-          <div class="reader-source-row">
-            <span class="reader-source-name">{{ store.selectedArticle.feed_title }}</span>
-          </div>
-          <h1 class="reader-title" v-html="renderTitleInlineHtml(store.selectedArticle.title)"></h1>
-          <div class="reader-source-link-row">
-            <a class="reader-source-link" :href="store.selectedArticle.url" target="_blank" rel="noopener noreferrer">
-              {{ store.selectedArticle.url }}
-            </a>
-          </div>
-          <div class="reader-meta">
-            <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }}</span>
-            <span v-if="readerPublishedAt(store.selectedArticle)">{{ readerPublishedAt(store.selectedArticle) }}</span>
-          </div>
-        </header>
-        <div class="article-reading-surface">
-          <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
-        </div>
-        <div v-if="summaryRunning || (summaryStepsExpanded && summaryStepItems.length)" class="summary-thought-panel">
-          <div class="summary-thought-header">
-            <div class="summary-thought-title-group">
-              <span class="summary-thought-kicker">{{ summaryRunning ? '实时过程' : '生成记录' }}</span>
-              <strong>{{ summaryRunning ? 'Summary Agent 正在工作' : '摘要生成过程' }}</strong>
-              <small>{{ summaryRunning ? '步骤由后端真实事件驱动，耗时停留在哪里就代表当前正在做哪里。' : '可展开查看上次生成时后端执行过的步骤。' }}</small>
+        <div class="reader-scroll-area">
+          <header class="reader-hero">
+            <div class="reader-source-row">
+              <span class="reader-source-name">{{ store.selectedArticle.feed_title }}</span>
             </div>
-            <el-button v-if="!summaryRunning" class="summary-thought-toggle" size="small" text @click="summaryStepsExpanded = false">
-              隐藏
+            <h1 class="reader-title" v-html="renderTitleInlineHtml(store.selectedArticle.title)"></h1>
+            <div class="reader-source-link-row">
+              <a class="reader-source-link" :href="store.selectedArticle.url" target="_blank" rel="noopener noreferrer">
+                {{ store.selectedArticle.url }}
+              </a>
+            </div>
+            <div class="reader-meta">
+              <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }}</span>
+              <span v-if="readerPublishedAt(store.selectedArticle)">{{ readerPublishedAt(store.selectedArticle) }}</span>
+            </div>
+          </header>
+          <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
+          <el-divider />
+          <h2 class="reader-section-title">笔记</h2>
+          <el-input v-model="note" type="textarea" :rows="6" placeholder="写下这篇文章的 Markdown 笔记" />
+          <div class="note-actions">
+            <el-button type="primary" @click="saveNote">保存笔记</el-button>
+            <el-button class="note-export-button" @click="exportNote">
+              导出笔记
+              <el-icon class="button-icon-right"><Download /></el-icon>
             </el-button>
           </div>
-          <transition-group name="summary-stream" tag="div" class="summary-thought-stream">
-            <div
-              v-for="step in summaryStepItems"
-              :key="step.id"
-              class="summary-thought-item"
-              :class="step.status"
-            >
-              <span class="summary-thought-line"></span>
-              <span class="summary-thought-dot"></span>
-              <div class="summary-thought-copy">
-                <div class="summary-thought-row">
-                  <strong>{{ step.title }}</strong>
-                  <span v-if="step.elapsedMs !== undefined" class="summary-thought-time">{{ formatElapsed(step.elapsedMs) }}</span>
-                </div>
-                <p>{{ step.detail }}</p>
-              </div>
-            </div>
-          </transition-group>
         </div>
-        <el-alert v-if="aiResult" type="success" show-icon :closable="false" class="summary-result-alert">
-          <template #title>
-            <div class="summary-result-title">
+
+        <!-- 底部摘要抽屉 -->
+        <div ref="summaryDrawerRef" class="summary-drawer" :class="{ expanded: summaryDrawerOpen, failed: summaryFailed }" :style="summaryDrawerOpen ? { '--drawer-height': summaryDrawerHeight + 'px' } : {}">
+          <div v-if="summaryDrawerOpen" class="summary-drawer-resize-bar" @mousedown.prevent="onDrawerDragStart"></div>
+          <button type="button" class="summary-drawer-handle" @click="toggleSummaryDrawer" :aria-expanded="summaryDrawerOpen">
+            <span class="summary-drawer-handle-label">
+              <el-icon class="summary-drawer-icon"><MagicStick /></el-icon>
               <span>AI 摘要</span>
-              <div class="summary-result-actions">
-                <span v-if="summaryUsage" class="summary-usage">{{ summaryUsage }}</span>
-                <el-button v-if="summaryStepItems.length" size="small" text @click="summaryStepsExpanded = !summaryStepsExpanded">
-                  {{ summaryStepsExpanded ? '收起思考过程' : '查看思考过程' }}
-                </el-button>
+              <el-icon v-if="summaryRunning" class="summary-drawer-loading-icon"><Loading /></el-icon>
+            </span>
+            <span class="summary-drawer-handle-center">
+              <span v-if="summaryFailed && !summaryRunning" class="summary-warning summary-warning-inline">摘要生成失败，请重新生成...</span>
+              <span v-else-if="summaryIncomplete && !summaryRunning" class="summary-warning summary-warning-inline">摘要内容展示不完全，请重新生成...</span>
+            </span>
+            <span class="summary-drawer-handle-right">
+              <span class="summary-drawer-arrow" :class="{ up: !summaryDrawerOpen }">›</span>
+            </span>
+          </button>
+          <div class="summary-drawer-body">
+            <div class="summary-drawer-controls">
+              <div class="summary-drawer-control-row">
+                <span class="summary-drawer-label">语言</span>
+                <el-select v-model="summaryLanguage" size="small" style="width: 110px" :teleported="false">
+                  <el-option v-for="opt in summaryLanguageOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
               </div>
+              <el-button
+                type="primary"
+                :disabled="summaryRunning"
+                class="summary-drawer-generate-btn"
+                @click="runSummary"
+              >
+                {{ summaryFailed ? '重新生成摘要' : '生成摘要' }}
+              </el-button>
             </div>
-          </template>
-          <div class="summary-result-body">{{ aiResult }}</div>
-        </el-alert>
-        <el-divider />
-        <h2 class="reader-section-title">笔记</h2>
-        <el-input v-model="note" type="textarea" :rows="6" placeholder="写下这篇文章的 Markdown 笔记" />
-        <div class="note-actions">
-          <el-button type="primary" @click="saveNote">保存笔记</el-button>
-          <el-button class="note-export-button" @click="exportNote">
-            导出笔记
-            <el-icon class="button-icon-right"><Download /></el-icon>
-          </el-button>
+            <div v-if="summaryRunning && summaryStepItems.length === 0" class="summary-drawer-loading">
+              <span class="summary-drawer-loading-dots">摘要生成中，请稍等</span>
+            </div>
+            <transition-group v-if="summaryRunning" name="summary-stream" tag="div" class="summary-drawer-stream">
+              <div
+                v-for="step in summaryStepItems"
+                :key="step.id"
+                class="summary-thought-item"
+                :class="step.status"
+              >
+                <span class="summary-thought-line"></span>
+                <span class="summary-thought-dot"></span>
+                <div class="summary-thought-copy">
+                  <div class="summary-thought-row">
+                    <strong>{{ step.title }}</strong>
+                    <span v-if="step.elapsedMs !== undefined" class="summary-thought-time">{{ formatElapsed(step.elapsedMs) }}</span>
+                  </div>
+                  <p>{{ step.detail }}</p>
+                </div>
+              </div>
+            </transition-group>
+            <div v-if="summaryResultVisible" class="summary-drawer-result">
+              <div class="summary-result-body article-body" v-html="renderedAiResult"></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -377,7 +367,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check, CollectionTag, Download, Files, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
+import { Check, CollectionTag, Download, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -399,16 +389,30 @@ const summaryActiveArticleId = ref<number | null>(null)
 const summaryProviders = ref<LLMProvider[]>([])
 const summaryProviderId = ref<number | null>(null)
 const summaryMode = ref<'brief' | 'structured' | 'deep'>('structured')
-const summaryLanguage = ref<'zh' | 'en'>('zh')
+const summaryLanguageOptions = [
+  { label: '中文', value: 'zh' },
+  { label: 'English', value: 'en' },
+  { label: '日本語', value: 'ja' },
+  { label: '한국어', value: 'ko' },
+  { label: 'Français', value: 'fr' },
+  { label: 'Deutsch', value: 'de' },
+  { label: 'Español', value: 'es' },
+  { label: 'Português', value: 'pt' },
+  { label: 'Русский', value: 'ru' },
+  { label: 'العربية', value: 'ar' },
+]
+function detectSystemLanguage(): string {
+  const lang = navigator.language || 'zh'
+  const prefix = lang.split('-')[0].toLowerCase()
+  const supported = summaryLanguageOptions.map(o => o.value)
+  return supported.includes(prefix) ? prefix : 'en'
+}
+const summaryLanguage = ref<string>(detectSystemLanguage())
 const summaryMaxWords = ref(450)
 const summaryModeOptions = [
   { label: '简短', value: 'brief' },
   { label: '结构化', value: 'structured' },
   { label: '深入', value: 'deep' }
-]
-const summaryLanguageOptions = [
-  { label: '中文', value: 'zh' },
-  { label: 'EN', value: 'en' }
 ]
 type SummaryThoughtStep = {
   id: string
@@ -420,7 +424,44 @@ type SummaryThoughtStep = {
   eventType: string
 }
 
+const summaryDrawerOpen = ref(false)
+const summaryDrawerHeight = ref(320)
+const summaryFailed = ref(false)
 const summaryStepItems = ref<SummaryThoughtStep[]>([])
+const summaryDrawerRef = ref<HTMLElement | null>(null)
+const summaryResultVisible = ref(false)
+
+function onDrawerDragStart(e: MouseEvent) {
+  const el = summaryDrawerRef.value
+  if (!el) return
+  const startY = e.clientY
+  const startHeight = summaryDrawerHeight.value
+
+  const body = el.querySelector('.summary-drawer-body') as HTMLElement | null
+  if (body) body.style.transition = 'none'
+
+  const onMove = (me: MouseEvent) => {
+    const next = Math.min(700, Math.max(120, startHeight + (startY - me.clientY)))
+    el.style.setProperty('--drawer-height', `${next}px`)
+  }
+  const onUp = (me: MouseEvent) => {
+    const next = Math.min(700, Math.max(120, startHeight + (startY - me.clientY)))
+    summaryDrawerHeight.value = next
+    if (body) body.style.transition = ''
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+const summaryDrawerTitle = computed(() => 'AI 摘要')
+
+function toggleSummaryDrawer() {
+  summaryDrawerOpen.value = !summaryDrawerOpen.value
+}
+
+
 const articleBodyRef = ref<HTMLElement | null>(null)
 const exportingMarkdown = ref(false)
 const feedManagerOpen = ref(false)
@@ -479,6 +520,19 @@ const currentListTitle = computed(() => {
   return '全部文章'
 })
 
+const renderedAiResult = computed(() => {
+  if (!aiResult.value) return ''
+  const cleaned = aiResult.value.replace(/^可信度[：:].+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+  return markdownToHtml(cleaned)
+})
+
+const summaryIncomplete = computed(() => {
+  if (!aiResult.value) return false
+  const text = aiResult.value.replace(/^可信度[：:].+$/gm, '').trim()
+  // 只有明确的截断迹象才报警：末尾是省略号、逗号、分号、冒号，或以空格结尾
+  return /([,，;；:：。、]|\.{2,}|…+|\s)$/.test(text)
+})
+
 const summaryClampStyle = computed(() => ({ WebkitLineClamp: String(store.summaryLineCount) }))
 const homeSyncResults = computed(() => lastHomeSyncReport.value?.results ?? [])
 const readerShellClass = computed(() => ({
@@ -510,6 +564,7 @@ watch(
   () => store.selectedArticle?.id,
   async () => {
     clearSummaryResult()
+    summaryDrawerOpen.value = false
     await loadNote()
   }
 )
@@ -855,7 +910,7 @@ function markdownToHtml(markdown: string) {
   return blocks.map(renderMarkdownBlock).join('')
 }
 
-function renderMarkdownBlock(block: string) {
+function renderMarkdownBlock(block: string): string {
   const lines = block.split('\n')
   if (lines[0]?.startsWith('```') && lines[lines.length - 1]?.startsWith('```')) {
     const code = lines.slice(1, -1).join('\n')
@@ -865,7 +920,10 @@ function renderMarkdownBlock(block: string) {
   const heading = lines[0]?.match(/^\s*(#{1,6})\s+(.+)$/)
   if (heading) {
     const level = heading[1].length
-    return `<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`
+    const headingHtml = `<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`
+    const rest = lines.slice(1).filter(Boolean)
+    if (!rest.length) return headingHtml
+    return headingHtml + renderMarkdownBlock(rest.join('\n'))
   }
 
   if (lines.every((line) => /^\s*[-*+]\s+/.test(line))) {
@@ -907,17 +965,30 @@ function clearSummaryResult() {
   summaryStepsExpanded.value = false
   summaryRunning.value = false
   summaryActiveArticleId.value = null
+  summaryFailed.value = false
+  summaryResultVisible.value = false
 }
 
 async function runSummary() {
   const articleId = store.selectedArticle?.id
   if (!articleId) return
   summaryRunning.value = true
+  summaryFailed.value = false
+  summaryDrawerOpen.value = true
   summaryActiveArticleId.value = articleId
   summaryStepsExpanded.value = true
   aiResult.value = ''
   summaryUsage.value = ''
   summaryStepItems.value = []
+
+  // 确保抽屉有足够高度展示步骤流（controls ~60px + 3条步骤 ~180px + padding）
+  const MIN_RUNNING_HEIGHT = 280
+  if (summaryDrawerHeight.value < MIN_RUNNING_HEIGHT) {
+    const panelEl = summaryDrawerRef.value?.closest('.reader-detail-panel') as HTMLElement | null
+    const panelHeight = panelEl?.clientHeight ?? window.innerHeight
+    summaryDrawerHeight.value = Math.min(panelHeight - 60, Math.max(MIN_RUNNING_HEIGHT, summaryDrawerHeight.value))
+    summaryDrawerRef.value?.style.setProperty('--drawer-height', `${summaryDrawerHeight.value}px`)
+  }
   try {
     await rssApi.streamSummary(articleId, {
       provider_id: summaryProviderId.value,
@@ -931,6 +1002,7 @@ async function runSummary() {
     })
     ElMessage.success('摘要已生成')
   } catch (error) {
+    summaryFailed.value = true
     failSummarySteps(getErrorMessage(error, '摘要生成失败，请检查 Provider 配置'))
     ElMessage.error(getErrorMessage(error, '摘要生成失败，请检查 Provider 配置'))
   } finally {
@@ -943,17 +1015,26 @@ async function runSummary() {
 
 function handleSummaryStreamEvent(event: SummaryStreamEvent) {
   if (event.type === 'result' && event.result) {
-    aiResult.value = event.result.result
-    summaryUsage.value = `${event.result.input_tokens} 输入 / ${event.result.output_tokens} 输出 tokens`
+    const resultText = event.result.result
+    const usage = `${event.result.input_tokens} 输入 / ${event.result.output_tokens} 输出 tokens`
     markSummaryStepsDone()
+    aiResult.value = resultText
+    summaryUsage.value = usage
+    if (!summaryResultVisible.value) {
+      const panelEl = summaryDrawerRef.value?.closest('.reader-detail-panel') as HTMLElement | null
+      const targetHeight = Math.round((panelEl?.clientHeight ?? window.innerHeight) / 3)
+      summaryDrawerHeight.value = Math.min(700, Math.max(120, targetHeight))
+    }
+    summaryResultVisible.value = true
+    summaryStepItems.value = []
     return
   }
   if (event.type === 'done') {
     markSummaryStepsDone()
-    summaryStepsExpanded.value = false
     return
   }
   if (event.type === 'error') {
+    summaryFailed.value = true
     failSummarySteps(event.detail || '摘要生成失败，请检查 Provider 配置、Ollama 服务或网络连接后重试。')
     return
   }
@@ -1467,15 +1548,24 @@ function exportNote() {
 }
 
 .summary-thought-item.done .summary-thought-dot {
-  background: color-mix(in srgb, var(--theme-accent) 70%, var(--app-surface) 30%);
-  border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--app-border) 28%);
+  background: color-mix(in srgb, var(--theme-accent) 35%, var(--app-surface) 65%);
+  border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--app-border) 62%);
 }
 
 .summary-thought-item.active .summary-thought-dot {
   background: var(--theme-accent);
   border-color: var(--theme-accent);
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--theme-accent) 14%, transparent 86%);
-  animation: summary-thinking-pulse 1.45s ease-in-out infinite;
+  overflow: visible;
+}
+
+.summary-thought-item.active .summary-thought-dot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--theme-accent);
+  opacity: 0.5;
+  animation: summary-ripple 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .summary-thought-item.error .summary-thought-dot {
@@ -1502,13 +1592,14 @@ function exportNote() {
   transform: translateY(-4px);
 }
 
-@keyframes summary-thinking-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--theme-accent) 12%, transparent 88%);
+@keyframes summary-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
   }
-  50% {
-    box-shadow: 0 0 0 8px color-mix(in srgb, var(--theme-accent) 4%, transparent 96%);
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
   }
 }
 
@@ -1657,15 +1748,24 @@ function exportNote() {
   position: relative;
   height: 100%;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  overflow: hidden;
   background: color-mix(in srgb, var(--app-surface-strong) 94%, white 6%);
   border-color: color-mix(in srgb, var(--app-border) 78%, transparent 22%);
   border-radius: 0;
   border-width: 0;
   box-shadow: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.reader-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 18px 24px 24px;
 }
 
@@ -1678,7 +1778,9 @@ function exportNote() {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  flex-shrink: 0;
+  padding: 18px 24px 0;
+  margin-bottom: 0;
 }
 
 .toolbar-icon-button {
@@ -1873,6 +1975,221 @@ function exportNote() {
     width: 64px;
     height: 64px;
   }
+}
+
+.reader-hero {
+  margin-bottom: 16px;
+  padding-top: 16px;
+}
+
+.summary-drawer {
+  flex-shrink: 0;
+  position: relative;
+  background: color-mix(in srgb, var(--app-surface-strong) 96%, var(--app-bg) 4%);
+  border-top: 1px solid color-mix(in srgb, var(--app-border) 80%, transparent 20%);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -4px 20px color-mix(in srgb, var(--app-text) 6%, transparent 94%);
+  transition: box-shadow 0.2s ease;
+}
+
+.summary-drawer.expanded {
+  box-shadow: 0 -6px 28px color-mix(in srgb, var(--app-text) 10%, transparent 90%);
+}
+
+.summary-drawer.failed .summary-drawer-handle {
+  border-top-color: color-mix(in srgb, var(--el-color-danger) 30%, var(--app-border) 70%);
+}
+
+.summary-drawer-handle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  padding: 10px 18px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  gap: 10px;
+  user-select: none;
+}
+
+.summary-drawer-resize-bar {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 1;
+}
+
+.summary-drawer-resize-bar::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-border) 80%, transparent 20%);
+  transition: background 0.15s;
+}
+
+.summary-drawer-resize-bar:hover::before {
+  background: var(--theme-accent);
+}
+
+.summary-drawer-handle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-drawer-handle-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.summary-drawer-handle-label-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--theme-accent) 80%, var(--app-text) 20%);
+}
+
+.summary-drawer-icon {
+  font-size: 15px;
+}
+
+.summary-drawer-loading-icon {
+  font-size: 13px;
+  animation: summary-icon-spin 0.9s linear infinite;
+}
+
+@keyframes summary-icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.summary-drawer-handle-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.summary-drawer-arrow {
+  font-size: 18px;
+  color: color-mix(in srgb, currentColor 50%, transparent 50%);
+  transition: transform 0.25s ease;
+  transform: rotate(90deg);
+  line-height: 1;
+  display: inline-block;
+}
+
+.summary-drawer-arrow.up {
+  transform: rotate(-90deg);
+}
+
+.summary-drawer-body {
+  overflow: hidden;
+  height: 0;
+  transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1), padding 0.32s ease;
+  padding: 0 18px;
+}
+
+.summary-drawer.expanded .summary-drawer-body {
+  height: var(--drawer-height, 320px);
+  padding: 0 18px 16px;
+  overflow-y: auto;
+}
+
+.summary-drawer-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--app-border) 60%, transparent 40%);
+  margin-bottom: 12px;
+}
+
+.summary-drawer-control-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
+.summary-drawer-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: color-mix(in srgb, currentColor 60%, transparent 40%);
+  white-space: nowrap;
+}
+
+.summary-drawer-generate-btn {
+  flex: 0 0 auto;
+  min-width: 110px;
+}
+
+.summary-drawer-loading {
+  padding: 10px 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.summary-drawer-loading-dots::after {
+  content: '';
+  display: inline-block;
+  animation: loading-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes loading-dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+  100% { content: ''; }
+}
+
+.summary-drawer-stream {
+  display: grid;
+  gap: 0;
+  margin-bottom: 12px;
+}
+
+.summary-warning {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-danger);
+}
+
+.summary-warning-inline {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.summary-drawer-result {
+  padding-top: 4px;
+}
+
+.summary-drawer-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.summary-drawer-result-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--theme-accent) 80%, var(--app-text) 20%);
 }
 
 @media (max-width: 960px) {

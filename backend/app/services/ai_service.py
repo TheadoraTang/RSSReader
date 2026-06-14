@@ -34,12 +34,24 @@ def summarize(
     except ValueError as exc:
         raise SummaryAgentError("未配置可用的 LLM Provider，请先在 AI 设置中新增并启用 Provider。") from exc
 
-    result = summarize_with_provider(
-        article,
-        provider,
-        SummaryOptions(mode=mode, language=language, max_words=max_words),
-        on_event=on_event,
-    )
+    try:
+        result = summarize_with_provider(
+            article,
+            provider,
+            SummaryOptions(mode=mode, language=language, max_words=max_words),
+            on_event=on_event,
+        )
+    except SummaryAgentError as exc:
+        repository.create_ai_result(
+            article_id,
+            "summary",
+            "",
+            str(exc),
+            provider=provider["name"],
+            model=provider["model"],
+            status="failed",
+        )
+        raise
     if on_event:
         on_event(
             {
