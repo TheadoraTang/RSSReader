@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS ai_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entry_id INTEGER NOT NULL,
     task_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'success',
     provider TEXT,
     model TEXT,
     prompt TEXT NOT NULL DEFAULT '',

@@ -442,20 +442,22 @@ class SQLiteRepository:
         model: str | None = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        status: str = "success",
     ):
         self.get_article(article_id)
         with get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO ai_results (
-                    entry_id, task_type, provider, model, prompt, result,
+                    entry_id, task_type, status, provider, model, prompt, result,
                     input_tokens, output_tokens
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     article_id,
                     result_type,
+                    status,
                     provider,
                     model,
                     prompt,
@@ -484,50 +486,127 @@ class SQLiteRepository:
             return None
         return self._ai_result(row)
 
-    def stats(self):
+    def _range_cutoff(self, range_: str | None) -> str | None:
+        from datetime import timedelta
+        now_local = datetime.now()
+        if range_ == "today":
+            cutoff = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif range_ == "week":
+            cutoff = (now_local - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        elif range_ == "month":
+            cutoff = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            return None
+        return cutoff.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _fill_buckets(self, range_: str | None, rows: list[dict]) -> list[dict]:
+        from datetime import timedelta
+        existing = {r["time_label"]: r for r in rows}
+        empty = {"calls": 0, "failed_calls": 0, "input_tokens": 0, "output_tokens": 0}
+
+        if range_ == "today":
+            labels = [f"{h:02d}:00" for h in range(24)]
+        elif range_ == "week":
+            today = datetime.now().date()
+            labels = [(today - timedelta(days=i)).strftime("%m-%d") for i in range(6, -1, -1)]
+        elif range_ == "month":
+            today = datetime.now().date()
+            first_of_month = today.replace(day=1)
+            days_in_month = (today - first_of_month).days + 1
+            labels = [(first_of_month + timedelta(days=i)).strftime("%m-%d") for i in range(days_in_month)]
+        else:
+            return rows
+
+        return [{"time_label": lbl, **existing.get(lbl, empty)} for lbl in labels]
+
+    def stats(self, range: str | None = None):
+        cutoff = self._range_cutoff(range)
+        where = "WHERE created_at >= ?" if cutoff else ""
+        params = [cutoff] if cutoff else []
+
         with get_connection() as conn:
             article_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
             usage = conn.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) AS total_calls,
+                    COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_calls,
                     COALESCE(SUM(input_tokens), 0) AS input_tokens,
                     COALESCE(SUM(output_tokens), 0) AS output_tokens
-                FROM ai_results
-                """
+                FROM ai_results {where}
+                """,
+                params,
             ).fetchone()
             by_feature = conn.execute(
-                """
+                f"""
                 SELECT
                     task_type AS name,
                     COUNT(*) AS calls,
                     COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
-                FROM ai_results
+                FROM ai_results {where}
                 GROUP BY task_type
                 ORDER BY calls DESC, name ASC
-                """
+                """,
+                params,
             ).fetchall()
             by_provider = conn.execute(
-                """
+                f"""
                 SELECT
                     COALESCE(provider, 'unknown') AS provider,
                     COALESCE(model, 'unknown') AS model,
                     COUNT(*) AS calls,
                     COALESCE(SUM(input_tokens), 0) AS input_tokens,
                     COALESCE(SUM(output_tokens), 0) AS output_tokens
-                FROM ai_results
+                FROM ai_results {where}
                 GROUP BY provider, model
                 ORDER BY calls DESC, provider ASC, model ASC
-                """
+                """,
+                params,
             ).fetchall()
         return {
             "total_articles": article_count,
             "total_calls": usage["total_calls"],
+            "failed_calls": usage["failed_calls"],
             "input_tokens": usage["input_tokens"],
             "output_tokens": usage["output_tokens"],
             "by_feature": [dict(row) for row in by_feature],
             "by_provider": [dict(row) for row in by_provider],
         }
+
+    def stats_timeseries(self, range: str | None = None) -> list[dict]:
+        cutoff = self._range_cutoff(range)
+        where = "WHERE created_at >= ?" if cutoff else ""
+        params = [cutoff] if cutoff else []
+
+        # Convert stored UTC-like timestamps to local time for bucketing
+        now_local = datetime.now()
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        offset_seconds = int((now_local - now_utc).total_seconds())
+        tz_modifier = f"{offset_seconds:+d} seconds"
+
+        if range == "today":
+            label_expr = f"strftime('%H:00', datetime(created_at, '{tz_modifier}'))"
+            bucket_expr = f"strftime('%Y-%m-%d %H:00:00', datetime(created_at, '{tz_modifier}'))"
+        else:
+            label_expr = f"strftime('%m-%d', datetime(created_at, '{tz_modifier}'))"
+            bucket_expr = f"strftime('%Y-%m-%d 00:00:00', datetime(created_at, '{tz_modifier}'))"
+
+        sql = f"""
+            SELECT
+                {label_expr} AS time_label,
+                {bucket_expr} AS bucket_key,
+                COUNT(*) AS calls,
+                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_calls,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens
+            FROM ai_results
+            {where}
+            GROUP BY bucket_key
+            ORDER BY bucket_key ASC
+        """
+        with get_connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return self._fill_buckets(range, [dict(r) for r in rows])
 
     def list_tags(self):
         return self.tags

@@ -57,6 +57,7 @@ def _migrate_ai_tables(conn: sqlite3.Connection) -> None:
     ai_migrations = {
         "provider": "ALTER TABLE ai_results ADD COLUMN provider TEXT",
         "model": "ALTER TABLE ai_results ADD COLUMN model TEXT",
+        "status": "ALTER TABLE ai_results ADD COLUMN status TEXT NOT NULL DEFAULT 'success'",
     }
     for column, statement in ai_migrations.items():
         if column not in ai_columns:

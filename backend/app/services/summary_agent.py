@@ -79,11 +79,10 @@ def _article_body(article: dict) -> str:
 
 def build_summary_prompt(article: dict, options: SummaryOptions | None = None) -> tuple[str, str]:
     options = options or SummaryOptions()
-    output_language = "中文" if options.language == "zh" else "English"
-    mode_instruction = _mode_instruction(options.mode)
+    output_language = _language_display(options.language)
+    mode_instruction = _mode_instruction(options.mode, options.language)
     system_prompt = (
         "你是 RSSReader 的文章摘要智能体，工作方式类似可靠的 coding agent："
-        "先理解输入与约束，再提炼关键信息，最后做一次自检。"
         "你不会编造正文没有的信息；如果正文只包含链接、评论数或分数，需要明确说明信息不足。"
         "输出必须面向阅读者，不能泄露内部推理过程或 <think> 内容。"
     )
@@ -97,7 +96,6 @@ def build_summary_prompt(article: dict, options: SummaryOptions | None = None) -
         "2. 提炼中心论点、事实、数字、风险或争议点。\n"
         "3. 自检摘要是否忠于原文，删除无法从原文支持的判断。\n\n"
         f"{mode_instruction}\n"
-        "最后增加一行 `可信度：高/中/低`，反映正文信息是否充分。"
     )
     return system_prompt, user_prompt
 
@@ -363,7 +361,7 @@ def _build_chunk_prompt(
     total: int,
     options: SummaryOptions,
 ) -> tuple[str, str]:
-    output_language = "中文" if options.language == "zh" else "English"
+    output_language = _language_display(options.language)
     system_prompt = (
         "你是 RSSReader 的长文摘要子任务 agent。"
         "当前输入只是整篇文章的一个片段，你的任务是提取可复用的事实笔记，"
@@ -391,7 +389,7 @@ def _build_compaction_prompt(
     round_number: int,
     options: SummaryOptions,
 ) -> tuple[str, str]:
-    output_language = "中文" if options.language == "zh" else "English"
+    output_language = _language_display(options.language)
     system_prompt = (
         "你是 RSSReader 的上下文压缩 agent。"
         "你的任务是在保留事实覆盖面的前提下压缩中间笔记，"
@@ -412,8 +410,8 @@ def _build_final_from_notes_prompt(
     notes: str,
     options: SummaryOptions,
 ) -> tuple[str, str]:
-    output_language = "中文" if options.language == "zh" else "English"
-    mode_instruction = _mode_instruction(options.mode)
+    output_language = _language_display(options.language)
+    mode_instruction = _mode_instruction(options.mode, options.language)
     system_prompt = (
         "你是 RSSReader 的最终摘要 agent。"
         "你会基于多个片段 agent 产生的事实笔记整合全文摘要。"
@@ -426,8 +424,7 @@ def _build_final_from_notes_prompt(
         f"长度上限：约 {options.max_words} 个词以内\n\n"
         "下面是从整篇文章多轮提取并压缩后的事实笔记。"
         "请执行最终合成：去重、按重要性排序、保留不确定性，并自检是否只使用笔记中支持的信息。\n\n"
-        f"{mode_instruction}\n"
-        "最后增加一行 `可信度：高/中/低`，反映正文信息是否充分。\n\n"
+        f"{mode_instruction}\n\n"
         f"事实笔记：\n{notes}"
     )
     return system_prompt, user_prompt
@@ -559,29 +556,71 @@ def _estimate_tokens(text: str) -> int:
     return max(1, non_ascii_chars + ascii_chars // 4)
 
 
-def _mode_instruction(mode: str) -> str:
-    if mode == "brief":
-        return (
-            "请按以下格式输出：\n"
-            "- 一句话概览：...\n"
-            "- 关键点：最多 3 条\n"
-            "- 关键词：3-5 个"
-        )
-    if mode == "deep":
+_LANGUAGE_NAMES: dict[str, str] = {
+    "zh": "中文",
+    "en": "English",
+    "ja": "日本語",
+    "ko": "한국어",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español",
+    "pt": "Português",
+    "ru": "Русский",
+    "ar": "العربية",
+}
+
+
+def _language_display(language: str) -> str:
+    return _LANGUAGE_NAMES.get(language, "English")
+
+
+def _mode_instruction(mode: str, language: str = "zh") -> str:
+    if language == "zh":
+        if mode == "brief":
+            return (
+                "请按以下格式输出：\n"
+                "- 一句话概览：...\n"
+                "- 关键点：最多 3 条\n"
+                "- 关键词：3-5 个"
+            )
+        if mode == "deep":
+            return (
+                "请按以下格式输出：\n"
+                "## 一句话概览\n...\n"
+                "## 背景与问题\n...\n"
+                "## 关键要点\n- 4-6 条\n"
+                "## 值得继续追踪\n- 2-4 条\n"
+                "## 关键词\n..."
+            )
         return (
             "请按以下格式输出：\n"
             "## 一句话概览\n...\n"
-            "## 背景与问题\n...\n"
-            "## 关键要点\n- 4-6 条\n"
-            "## 值得继续追踪\n- 2-4 条\n"
+            "## 关键要点\n- 3-5 条\n"
             "## 关键词\n..."
         )
-    return (
-        "请按以下格式输出：\n"
-        "## 一句话概览\n...\n"
-        "## 关键要点\n- 3-5 条\n"
-        "## 关键词\n..."
-    )
+    else:
+        if mode == "brief":
+            return (
+                "Please output in the following format:\n"
+                "- Overview: ...\n"
+                "- Key points: up to 3\n"
+                "- Keywords: 3-5"
+            )
+        if mode == "deep":
+            return (
+                "Please output in the following format:\n"
+                "## Overview\n...\n"
+                "## Background\n...\n"
+                "## Key Takeaways\n- 4-6 items\n"
+                "## Worth Following Up\n- 2-4 items\n"
+                "## Keywords\n..."
+            )
+        return (
+            "Please output in the following format:\n"
+            "## Overview\n...\n"
+            "## Key Takeaways\n- 3-5 items\n"
+            "## Keywords\n..."
+        )
 
 
 def _max_tokens_for_options(options: SummaryOptions) -> int:

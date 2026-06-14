@@ -83,7 +83,7 @@ export interface SummaryRequestPayload {
   provider_id?: number | null
   refresh?: boolean
   mode?: 'brief' | 'structured' | 'deep'
-  language?: 'zh' | 'en'
+  language?: string
   max_words?: number
 }
 
@@ -218,6 +218,16 @@ export interface OPMLImportReport {
   results: OPMLImportItem[]
 }
 
+export interface LLMTimeseriesBucket {
+  time_label: string
+  calls: number
+  failed_calls: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export type StatsRange = 'today' | 'week' | 'month' | 'all'
+
 export interface SyncLog {
   id: number
   feed_id?: number | null
@@ -293,7 +303,10 @@ export const rssApi = {
   createLLMProvider: (payload: LLMProviderPayload) => api.post<LLMProvider>('/ai/providers', payload).then((res) => res.data),
   updateLLMProvider: (id: number, payload: Partial<LLMProviderPayload>) => api.put<LLMProvider>(`/ai/providers/${id}`, payload).then((res) => res.data),
   deleteLLMProvider: (id: number) => api.delete<OperationResult>(`/ai/providers/${id}`).then((res) => res.data),
-  llmStats: () => api.get('/stats/llm').then((res) => res.data),
+  llmStats: (range?: StatsRange) =>
+    api.get('/stats/llm', { params: range ? { range } : {} }).then((res) => res.data),
+  llmTimeseries: (range: StatsRange = 'today') =>
+    api.get<LLMTimeseriesBucket[]>('/stats/llm/timeseries', { params: { range } }).then((res) => res.data),
   syncLogs: () => api.get<SyncLog[]>('/logs/sync').then((res) => res.data),
   search: (q: string, limit = 50) =>
     api.get<SearchResult[]>('/search', { params: { q, limit } }).then((res) => res.data),

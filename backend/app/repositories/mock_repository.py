@@ -232,7 +232,7 @@ class MockRepository:
             }
         )
 
-    def stats(self):
+    def stats(self, range_=None):
         total_input = sum(item["input_tokens"] for item in self.ai_results) or 1024
         total_output = sum(item["output_tokens"] for item in self.ai_results) or 512
         return {
@@ -245,6 +245,18 @@ class MockRepository:
                 {"name": "tag_suggestion", "calls": 1, "tokens": 384},
             ],
         }
+
+    def stats_timeseries(self, range_=None):
+        hours = [f"{h:02d}:00" for h in range(24)]
+        return [
+            {
+                "time_label": h,
+                "calls": 1 if h in ("09:00", "14:00") else 0,
+                "input_tokens": 400 if h == "09:00" else 0,
+                "output_tokens": 150 if h == "09:00" else 0,
+            }
+            for h in hours
+        ]
 
     def _find(self, rows, item_id):
         for row in rows:

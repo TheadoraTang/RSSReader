@@ -2,42 +2,51 @@
   <div class="stats-page">
     <div class="page-title">
       <h1>统计日志</h1>
-      <el-button class="stats-refresh-button" :icon="Refresh" @click="load">刷新</el-button>
     </div>
     <div class="stats-grid">
       <section class="panel stats-summary-panel">
         <div class="stats-panel-head">
-          <h2>LLM 用量统计</h2>
-          <p class="muted">当前 AI 功能的调用与 Token 消耗概览</p>
+          <span class="stats-panel-title">流量统计</span>
+          <el-button text :icon="collapsed ? ArrowDown : ArrowUp" @click="collapsed = !collapsed" />
         </div>
-        <div class="stats-cards">
-          <div class="stats-card">
-            <div class="stats-card-label">调用次数</div>
-            <div class="stats-card-value">{{ stats.total_calls || 0 }}</div>
+
+        <template v-if="!collapsed">
+          <div class="stats-controls">
+            <div class="stats-range-tabs">
+              <button
+                v-for="opt in rangeOptions"
+                :key="opt.value"
+                class="range-tab"
+                :class="{ active: selectedRange === opt.value }"
+                @click="selectRange(opt.value)"
+              >{{ opt.label }}</button>
+              <el-button :icon="Refresh" text @click="loadAll" />
+            </div>
+            <div class="chart-mode-toggle">
+              <button :class="{ active: chartMode === 'calls' }" @click="chartMode = 'calls'">请求次数</button>
+              <button :class="{ active: chartMode === 'tokens' }" @click="chartMode = 'tokens'">TOKEN</button>
+            </div>
           </div>
-          <div class="stats-card">
-            <div class="stats-card-label">输入 Token</div>
-            <div class="stats-card-value">{{ stats.input_tokens || 0 }}</div>
+
+          <div class="stats-cards">
+            <div class="stats-card">
+              <div class="stats-card-label">总请求</div>
+              <div class="stats-card-value">{{ stats.total_calls ?? 0 }}</div>
+            </div>
+            <div class="stats-card">
+              <div class="stats-card-label">输入 Token</div>
+              <div class="stats-card-value">{{ formatTokens(stats.input_tokens) }}</div>
+            </div>
+            <div class="stats-card">
+              <div class="stats-card-label">输出 Token</div>
+              <div class="stats-card-value">{{ formatTokens(stats.output_tokens) }}</div>
+            </div>
           </div>
-          <div class="stats-card">
-            <div class="stats-card-label">输出 Token</div>
-            <div class="stats-card-value">{{ stats.output_tokens || 0 }}</div>
+
+          <div class="stats-chart-wrap">
+            <Bar :data="chartData" :options="chartOptions" />
           </div>
-        </div>
-        <div v-if="stats.by_feature?.length" class="usage-breakdown">
-          <h3>按功能</h3>
-          <div v-for="item in stats.by_feature" :key="item.name" class="usage-row">
-            <span>{{ featureLabel(item.name) }}</span>
-            <span>{{ item.calls }} 次 · {{ item.tokens }} tokens</span>
-          </div>
-        </div>
-        <div v-if="stats.by_provider?.length" class="usage-breakdown">
-          <h3>按 Provider</h3>
-          <div v-for="item in stats.by_provider" :key="`${item.provider}-${item.model}`" class="usage-row">
-            <span>{{ item.provider }} · {{ item.model }}</span>
-            <span>{{ item.calls }} 次 · {{ item.input_tokens + item.output_tokens }} tokens</span>
-          </div>
-        </div>
+        </template>
       </section>
       <section class="panel stats-log-panel">
         <div class="stats-panel-head">
@@ -69,21 +78,152 @@
 </template>
 
 <script setup lang="ts">
-import { Refresh } from '@element-plus/icons-vue'
-import { onMounted, ref } from 'vue'
-import type { SyncLog } from '../api/client'
+import { ArrowDown, ArrowUp, Refresh } from '@element-plus/icons-vue'
+import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Tooltip } from 'chart.js'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Bar } from 'vue-chartjs'
+import type { LLMTimeseriesBucket, StatsRange, SyncLog } from '../api/client'
 import { rssApi } from '../api/client'
 import { statusTagType, syncSuggestion } from '../utils/syncDiagnostics'
 
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
+
+const collapsed = ref(false)
+const selectedRange = ref<StatsRange>('today')
+const chartMode = ref<'calls' | 'tokens'>('calls')
 const stats = ref<Record<string, any>>({})
+const timeseries = ref<LLMTimeseriesBucket[]>([])
 const logs = ref<SyncLog[]>([])
 
-onMounted(load)
+const rangeOptions: { label: string; value: StatsRange }[] = [
+  { label: '今天', value: 'today' },
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' },
+  { label: '全部', value: 'all' },
+]
 
-async function load() {
-  stats.value = await rssApi.llmStats()
+async function loadStats() {
+  stats.value = await rssApi.llmStats(selectedRange.value)
+}
+async function loadTimeseries() {
+  timeseries.value = await rssApi.llmTimeseries(selectedRange.value)
+}
+async function loadAll() {
+  await Promise.all([loadStats(), loadTimeseries(), loadSyncLogs()])
+}
+async function loadSyncLogs() {
   logs.value = await rssApi.syncLogs()
 }
+function selectRange(range: StatsRange) {
+  selectedRange.value = range
+}
+
+watch(selectedRange, () => {
+  loadStats()
+  loadTimeseries()
+})
+
+onMounted(loadAll)
+
+function formatTokens(n: number | undefined): string {
+  if (!n) return '0'
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+  return String(n)
+}
+
+const chartData = computed(() => {
+  const labels = timeseries.value.map((b) => b.time_label)
+  if (chartMode.value === 'calls') {
+    return {
+      labels,
+      datasets: [
+        {
+          label: '请求次数',
+          data: timeseries.value.map((b) => b.calls),
+          backgroundColor: 'rgba(239, 100, 97, 0.75)',
+          hoverBackgroundColor: 'rgba(239, 100, 97, 1)',
+          borderRadius: 6,
+          borderSkipped: false,
+          barPercentage: 0.5,
+          categoryPercentage: 0.6,
+        },
+      ],
+    }
+  }
+  return {
+    labels,
+    datasets: [
+      {
+        label: '输入 Token',
+        data: timeseries.value.map((b) => b.input_tokens),
+        backgroundColor: 'rgba(99, 102, 241, 0.75)',
+        hoverBackgroundColor: 'rgba(99, 102, 241, 1)',
+        borderRadius: 6,
+        borderSkipped: false,
+        barPercentage: 0.5,
+        categoryPercentage: 0.6,
+      },
+      {
+        label: '输出 Token',
+        data: timeseries.value.map((b) => b.output_tokens),
+        backgroundColor: 'rgba(52, 211, 153, 0.75)',
+        hoverBackgroundColor: 'rgba(52, 211, 153, 1)',
+        borderRadius: 6,
+        borderSkipped: false,
+        barPercentage: 0.5,
+        categoryPercentage: 0.6,
+      },
+    ],
+  }
+})
+
+const chartOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: chartMode.value === 'tokens', align: 'end' as const },
+    tooltip: {
+      mode: 'index' as const,
+      intersect: false,
+      filter: (item: any) => {
+        const data = item.chart.data.datasets.reduce(
+          (sum: number, ds: any) => sum + ((ds.data[item.dataIndex] as number) || 0),
+          0
+        )
+        return data > 0
+      },
+      callbacks: chartMode.value === 'calls'
+        ? {
+            afterBody: (items: any[]) => {
+              if (!items.length) return []
+              const idx = items[0].dataIndex
+              const bucket = timeseries.value[idx]
+              if (!bucket || !bucket.failed_calls) return []
+              const pct = ((bucket.failed_calls / bucket.calls) * 100).toFixed(1)
+              return [`请求异常: ${bucket.failed_calls} (${pct}%)`]
+            },
+          }
+        : {},
+    },
+  },
+  scales: {
+    x: {
+      grid: { display: false },
+      border: { display: false },
+      ticks: {
+        font: { size: 11 },
+        color: '#9ca3af',
+        maxTicksLimit: selectedRange.value === 'today' ? 8 : undefined,
+      },
+    },
+    y: {
+      beginAtZero: true,
+      border: { display: false, dash: [4, 4] },
+      grid: { color: 'rgba(0,0,0,0.06)', lineWidth: 1 },
+      ticks: { precision: 0, font: { size: 11 }, color: '#9ca3af' },
+    },
+  },
+}))
 
 function formatLogTime(value: string) {
   const date = new Date(value)
@@ -104,15 +244,6 @@ function statusLabel(status: string) {
   }
   return labels[status] || status
 }
-
-function featureLabel(name: string) {
-  const labels: Record<string, string> = {
-    summary: '文章摘要',
-    translation: '翻译',
-    tag_suggestion: '标签建议'
-  }
-  return labels[name] || name
-}
 </script>
 
 <style scoped>
@@ -122,7 +253,7 @@ function featureLabel(name: string) {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 16px;
 }
 
@@ -132,58 +263,114 @@ function featureLabel(name: string) {
 }
 
 .stats-panel-head {
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.stats-panel-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.stats-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 8px;
+}
+
+.stats-range-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.range-tab {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.range-tab.active {
+  background: var(--el-color-primary);
+  color: #fff;
+  border-color: var(--el-color-primary);
+}
+
+.chart-mode-toggle {
+  display: flex;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chart-mode-toggle button {
+  padding: 4px 14px;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--el-text-color-regular);
+  transition: background 0.15s, color 0.15s;
+}
+
+.chart-mode-toggle button.active {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.stats-card {
+  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent 24%);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--app-surface-strong) 94%, var(--app-bg) 6%);
+  text-align: center;
+}
+
+.stats-card-label {
+  color: #7a8799;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.stats-card-value {
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.stats-chart-wrap {
+  height: 220px;
+  position: relative;
+}
+
+.stats-panel-head {
+  margin-bottom: 0;
+}
+
+.stats-log-panel {
+  border-radius: 20px;
 }
 
 .stats-panel-head h2 {
   margin: 0 0 4px;
   font-size: 20px;
-}
-
-.stats-cards {
-  display: grid;
-  gap: 12px;
-}
-
-.stats-card {
-  border: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent 24%);
-  border-radius: 18px;
-  padding: 16px;
-  background: color-mix(in srgb, var(--app-surface-strong) 94%, var(--app-bg) 6%);
-}
-
-.stats-card-label {
-  color: #7a8799;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.stats-card-value {
-  margin-top: 10px;
-  font-size: 30px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-}
-
-.usage-breakdown {
-  margin-top: 18px;
-  display: grid;
-  gap: 8px;
-}
-
-.usage-breakdown h3 {
-  margin: 0;
-  font-size: 14px;
-}
-
-.usage-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-top: 1px solid color-mix(in srgb, var(--app-border) 60%, transparent 40%);
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
 }
 
 .stats-timeline {
@@ -248,7 +435,7 @@ function featureLabel(name: string) {
     padding: 14px;
   }
 
-  .stats-grid {
+  .stats-cards {
     grid-template-columns: 1fr;
   }
 }
