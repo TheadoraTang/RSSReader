@@ -242,6 +242,7 @@ export interface BatchDigestExportRequest {
   article_ids: number[]
   include_summary: boolean
   include_note: boolean
+  include_full_text: boolean
 }
 
 export interface BatchDigestExportResponse {

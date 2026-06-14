@@ -52,12 +52,14 @@ def batch_digest_export(payload):
         summary_text = _normalize_optional_text(summary_record["result"]) if summary_record else None
         if summary_text:
             summary_available_count += 1
+        full_text = _normalize_optional_text(article.get("cleaned_markdown")) or _normalize_optional_text(article.get("summary"))
 
         entries.append(
             {
                 "title": title,
                 "author": author,
                 "url": url,
+                "full_text": full_text if payload.include_full_text else None,
                 "summary": summary_text if payload.include_summary else None,
                 "note": _normalize_optional_text(note.get("content_markdown")) if payload.include_note else None,
             }
@@ -100,6 +102,15 @@ def _render_batch_digest_markdown(digest_title: str, filename: str, export_time:
                 f"**Author**: {entry['author']}",
             ]
         )
+
+        if entry["full_text"]:
+            lines.extend(
+                [
+                    "",
+                    "**Full Text**:",
+                    entry["full_text"],
+                ]
+            )
 
         if entry["summary"]:
             lines.extend(
