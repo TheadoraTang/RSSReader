@@ -49,7 +49,8 @@
 {
   "article_ids": [12, 8, 3],
   "include_summary": true,
-  "include_note": true
+  "include_note": true,
+  "include_full_text": false
 }
 ```
 
@@ -69,6 +70,7 @@
 
 - 导出顺序以 `article_ids` 提供的顺序为准
 - `include_summary=true` 时，仅取最新一条 AI 摘要结果
+- `include_full_text=true` 时，导出文章清洗后的 Markdown 正文；若正文缺失，则回退到文章摘要
 - 缺少标题或链接的文章会被跳过，并写入 `skipped_article_ids`
 
 ## AI

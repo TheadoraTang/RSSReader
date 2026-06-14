@@ -189,6 +189,7 @@ class BatchDigestExportRequest(BaseModel):
     article_ids: list[int] = Field(min_length=1)
     include_summary: bool = False
     include_note: bool = False
+    include_full_text: bool = False
 
 
 class BatchDigestExportResponse(BaseModel):

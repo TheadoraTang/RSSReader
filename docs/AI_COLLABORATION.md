@@ -299,4 +299,27 @@
 - 当日验证：前端 `vue-tsc --noEmit` 通过，手动验证时序图正确显示本地时间、折叠/展开、时间跨度切换、请求异常 tooltip 均符合预期。
 - 当前限制：时区处理依赖后端系统本地时区，若后端部署在与用户不同时区的服务器上需额外处理；请求异常统计仅覆盖摘要功能（translate/tag_suggestion 暂未接入失败记录）。
 
+## 2026-06-14（Week16 阅读页笔记弹窗入口）
 
+- 使用 AI Coding Agent 阅读项目结构、定位阅读页工具栏、正文底部笔记区域、前端笔记 API 和后端 notes 数据流，并制定实现计划。
+- 将阅读页笔记入口从文章正文底部迁移到顶部工具栏导出按钮左侧，新增 `EditPen` 图标按钮，通过 `el-popover` 打开笔记小窗口。
+- 弹窗复用现有 `note` 状态、`saveNote()` 和 `exportNote()`，保留 Markdown 编辑、保存笔记和导出笔记能力。
+- 删除正文末尾旧笔记编辑区，避免同一篇文章出现两个笔记入口。
+- 保存笔记新增 `savingNote` loading 状态，避免重复提交。
+- 本次未修改后端接口、数据库表结构或导出服务，继续使用 `GET/PUT /api/articles/{id}/note` 和 `notes` 表。
+- 新增 `update_docs/Week16_specia1week.md` 记录本次任务范围、实现内容、验证结果和限制。
+- 当日验证：执行 `cd frontend && npm run build`，构建通过；Vite/Rollup 仅输出第三方依赖注释和 chunk size 警告。
+- 当前限制：本次未新增自动化 UI 测试；笔记仍保持手动保存语义，不做自动保存。
+
+## 2026-06-14（Week16 批量文摘导出 UI 恢复）
+
+- 使用 AI Coding Agent 复查 `update_docs/Week14_batch_export_plan.md`、当前导出 API、Electron 保存 IPC 和阅读页列表菜单，确认后端 `POST /api/export/digests/markdown`、前端 `rssApi.exportBatchDigestMarkdown()` 与桌面端 `saveMarkdown` 能力仍存在。
+- 恢复阅读页“批量文摘”入口：从文章列表右上角菜单进入批量选择模式，不再只显示占位提示。
+- 在当前列表文章卡片左侧新增选择圆点，点击卡片即可勾选/取消；导出顺序按当前列表顺序计算，不按勾选顺序。
+- 新增批量工具条，展示已选数量，并提供全选、清空、预览导出和退出。
+- 新增批量文摘预览弹窗，支持切换“包含 AI 摘要”和“包含笔记”，展示可导出数量、摘要数量、跳过数量和后端生成的 Markdown 预览。
+- 根据追加需求，批量文摘预览弹窗新增“包含全文”选项，与“包含 AI 摘要”“包含笔记”并列；后端请求体新增 `include_full_text`，导出时优先写入文章清洗后的 Markdown 正文，缺失时回退到文章摘要。
+- 新增复制预览 Markdown 和导出 Markdown 操作；Web 端触发浏览器下载，Electron 端复用原生保存对话框。
+- 更新 `update_docs/Week14_batch_export_plan.md`，记录 Week16 UI 改版后的恢复内容；同步扩展 `update_docs/Week16_specia1week.md`。
+- 当日验证：执行 `cd backend && python -m py_compile app/schemas/rss.py app/services/export_service.py app/routers/export.py` 通过；执行 `cd frontend && npm run build`，构建通过；Vite/Rollup 仍仅输出第三方依赖注释和 chunk size 警告。
+- 当前限制：本次未新增自动化 UI 测试；仍不支持自定义 digest 模板、固定导出目录设置，也不会在导出流程中自动生成缺失摘要。

@@ -144,14 +144,49 @@
             </el-dropdown>
           </div>
         </div>
+        <div v-if="batchExportMode" class="batch-export-bar">
+          <div class="batch-export-status">
+            <strong>批量文摘</strong>
+            <span>已选 {{ batchSelectedArticles.length }} / {{ filteredArticles.length }}</span>
+          </div>
+          <div class="batch-export-actions">
+            <el-button size="small" :icon="Check" @click="selectAllBatchArticles">全选</el-button>
+            <el-button size="small" @click="clearBatchSelection">清空</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              :icon="Files"
+              :disabled="batchSelectedArticles.length === 0"
+              @click="openBatchDigestDialog"
+            >
+              预览导出
+            </el-button>
+            <el-button size="small" :icon="Close" @click="exitBatchExportMode">退出</el-button>
+          </div>
+        </div>
 
         <article
           v-for="article in filteredArticles"
           :key="article.id"
           class="article-card"
-          :class="{ active: store.selectedArticle?.id === article.id, pinned: store.isPinned(article.id) }"
+          :class="{
+            active: !batchExportMode && store.selectedArticle?.id === article.id,
+            pinned: store.isPinned(article.id),
+            'batch-mode': batchExportMode,
+            'batch-selected': isBatchArticleSelected(article.id)
+          }"
           @click="handleArticleClick(article.id)"
         >
+          <button
+            v-if="batchExportMode"
+            type="button"
+            class="article-select-control"
+            :class="{ checked: isBatchArticleSelected(article.id) }"
+            :aria-label="`选择 ${article.title}`"
+            @click.stop="toggleBatchArticle(article.id)"
+          >
+            <el-icon v-if="isBatchArticleSelected(article.id)"><Check /></el-icon>
+          </button>
           <div class="article-card-meta-row">
             <span class="article-card-source">{{ article.feed_title }}</span>
             <span class="article-card-date">{{ formatArticleDate(article) }}</span>
@@ -239,6 +274,46 @@
           <el-tooltip content="翻译" placement="top">
             <el-button class="toolbar-icon-button" :icon="Switch" circle @click="runTranslate" />
           </el-tooltip>
+          <el-popover
+            v-model:visible="notePopoverOpen"
+            placement="bottom"
+            :width="420"
+            trigger="click"
+            popper-class="note-popover"
+            :teleported="false"
+          >
+            <template #reference>
+              <el-button
+                class="toolbar-icon-button"
+                :class="{ active: notePopoverOpen }"
+                :icon="EditPen"
+                circle
+                aria-label="笔记"
+                title="笔记"
+              />
+            </template>
+            <div class="note-popover-body">
+              <div class="note-popover-header">
+                <span class="note-popover-title">笔记</span>
+                <span class="note-popover-meta">Markdown</span>
+              </div>
+              <el-input
+                v-model="note"
+                class="note-popover-input"
+                type="textarea"
+                :rows="8"
+                resize="none"
+                placeholder="写下这篇文章的 Markdown 笔记"
+              />
+              <div class="note-actions note-popover-actions">
+                <el-button type="primary" :loading="savingNote" @click="saveNote">保存笔记</el-button>
+                <el-button class="note-export-button" @click="exportNote">
+                  导出笔记
+                  <el-icon class="button-icon-right"><Download /></el-icon>
+                </el-button>
+              </div>
+            </div>
+          </el-popover>
           <el-dropdown trigger="click" @command="handleExportCommand">
             <el-button class="toolbar-icon-button export-trigger" :loading="exportingMarkdown" circle aria-label="导出">
               <el-icon><Download /></el-icon>
@@ -269,16 +344,6 @@
             </div>
           </header>
           <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
-          <el-divider />
-          <h2 class="reader-section-title">笔记</h2>
-          <el-input v-model="note" type="textarea" :rows="6" placeholder="写下这篇文章的 Markdown 笔记" />
-          <div class="note-actions">
-            <el-button type="primary" @click="saveNote">保存笔记</el-button>
-            <el-button class="note-export-button" @click="exportNote">
-              导出笔记
-              <el-icon class="button-icon-right"><Download /></el-icon>
-            </el-button>
-          </div>
         </div>
 
         <!-- 底部摘要抽屉 -->
@@ -362,16 +427,69 @@
           </el-table-column>
         </el-table>
       </el-dialog>
+      <el-dialog
+        v-model="batchDigestDialogOpen"
+        title="批量导出文摘"
+        width="760px"
+        class="batch-digest-dialog"
+        append-to-body
+      >
+        <div class="batch-digest-body">
+          <div class="batch-digest-options">
+            <el-checkbox v-model="batchIncludeSummary" @change="loadBatchDigestPreview">包含 AI 摘要</el-checkbox>
+            <el-checkbox v-model="batchIncludeNote" @change="loadBatchDigestPreview">包含笔记</el-checkbox>
+            <el-checkbox v-model="batchIncludeFullText" @change="loadBatchDigestPreview">包含全文</el-checkbox>
+          </div>
+          <div class="batch-digest-meta">
+            <span>已选择 {{ batchSelectedArticles.length }} 篇</span>
+            <span v-if="batchDigestPreview">可导出 {{ batchDigestPreview.exported_article_ids.length }} 篇</span>
+            <span v-if="batchDigestPreview && batchIncludeSummary">包含摘要 {{ batchDigestPreview.summary_available_count }} 篇</span>
+          </div>
+          <el-alert
+            v-if="batchDigestPreview?.skipped_article_ids.length"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="batch-digest-alert"
+            :title="`${batchDigestPreview.skipped_article_ids.length} 篇文章缺少标题或链接，已跳过。`"
+          />
+          <el-input
+            v-loading="batchPreviewLoading"
+            class="batch-digest-preview"
+            type="textarea"
+            resize="none"
+            readonly
+            :rows="18"
+            :model-value="batchDigestPreview?.markdown || ''"
+            placeholder="正在生成文摘预览..."
+          />
+        </div>
+        <template #footer>
+          <div class="batch-digest-footer">
+            <el-button :icon="CopyDocument" :disabled="!batchDigestPreview" @click="copyBatchDigestPreview">复制</el-button>
+            <el-button @click="batchDigestDialogOpen = false">取消</el-button>
+            <el-button
+              type="primary"
+              :icon="Download"
+              :loading="batchSavingDigest"
+              :disabled="!batchDigestPreview || batchPreviewLoading"
+              @click="exportBatchDigest"
+            >
+              导出 Markdown
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Check, CollectionTag, Download, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
+import { Check, Close, CollectionTag, CopyDocument, Download, EditPen, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Article, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
+import type { Article, BatchDigestExportResponse, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
 import { getErrorMessage, rssApi } from '../api/client'
 import { useReaderStore } from '../stores/reader'
 import { apiErrorMessage, showSyncReportMessage, statusTagType, syncSuggestion } from '../utils/syncDiagnostics'
@@ -381,6 +499,8 @@ const store = useReaderStore()
 const route = useRoute()
 const router = useRouter()
 const note = ref('')
+const notePopoverOpen = ref(false)
+const savingNote = ref(false)
 const aiResult = ref('')
 const summaryUsage = ref('')
 const summaryRunning = ref(false)
@@ -468,6 +588,15 @@ const feedManagerOpen = ref(false)
 const activeFilterKey = ref<'all' | 'unread' | 'starred'>('all')
 const activeFeedId = ref<number | null>(null)
 const activeTagId = ref<number | null>(null)
+const batchExportMode = ref(false)
+const batchDigestDialogOpen = ref(false)
+const batchPreviewLoading = ref(false)
+const batchSavingDigest = ref(false)
+const batchIncludeSummary = ref(true)
+const batchIncludeNote = ref(true)
+const batchDigestPreview = ref<BatchDigestExportResponse | null>(null)
+const selectedBatchArticleIds = ref<number[]>([])
+const batchIncludeFullText = ref(false)
 const newTagName = ref('')
 const newTagColor = ref('#5b8def')
 const failedThumbnailKeys = ref<Set<string>>(new Set())
@@ -511,6 +640,11 @@ const filteredArticles = computed(() => {
   }
   return list
 })
+
+const selectedBatchArticleIdSet = computed(() => new Set(selectedBatchArticleIds.value))
+const batchSelectedArticles = computed(() =>
+  filteredArticles.value.filter((article) => selectedBatchArticleIdSet.value.has(article.id))
+)
 
 const currentListTitle = computed(() => {
   if (activeFeedId.value !== null) return store.feeds.find((feed) => feed.id === activeFeedId.value)?.title ?? '当前订阅'
@@ -583,6 +717,14 @@ watch(
   { immediate: true }
 )
 watch(filteredArticles, ensureVisibleSelection)
+watch(filteredArticles, (articles) => {
+  if (!batchExportMode.value) return
+  const articleIds = new Set(articles.map((article) => article.id))
+  selectedBatchArticleIds.value = selectedBatchArticleIds.value.filter((id) => articleIds.has(id))
+  if (batchDigestDialogOpen.value) {
+    void loadBatchDigestPreview()
+  }
+})
 watch(
   () => route.query.panel,
   (panel) => {
@@ -650,6 +792,7 @@ function ensureVisibleSelection() {
 }
 
 function applyQuickFilter(key: 'all' | 'unread' | 'starred') {
+  exitBatchExportMode()
   activeFilterKey.value = key
   activeFeedId.value = null
   activeTagId.value = null
@@ -657,6 +800,7 @@ function applyQuickFilter(key: 'all' | 'unread' | 'starred') {
 }
 
 function applyFeedFilter(feedId: number | null) {
+  exitBatchExportMode()
   activeFeedId.value = feedId
   activeTagId.value = null
   activeFilterKey.value = 'all'
@@ -664,6 +808,7 @@ function applyFeedFilter(feedId: number | null) {
 }
 
 function openFeedManager() {
+  exitBatchExportMode()
   feedManagerOpen.value = true
   if (route.query.panel !== 'feeds') {
     void router.replace({ path: '/', query: { ...route.query, panel: 'feeds' } })
@@ -782,8 +927,14 @@ async function toggleSelectedArticleTag(tagId: number) {
 
 async function saveNote() {
   if (!store.selectedArticle) return
-  await rssApi.saveNote(store.selectedArticle.id, note.value)
-  ElMessage.success('笔记已保存')
+  if (savingNote.value) return
+  savingNote.value = true
+  try {
+    await rssApi.saveNote(store.selectedArticle.id, note.value)
+    ElMessage.success('笔记已保存')
+  } finally {
+    savingNote.value = false
+  }
 }
 
 async function exportMarkdown() {
@@ -804,20 +955,33 @@ async function exportDigest() {
     const data = await rssApi.exportBatchDigestMarkdown({
       article_ids: [store.selectedArticle.id],
       include_summary: true,
-      include_note: true
+      include_note: true,
+      include_full_text: false
     })
-    const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' })
-    triggerBrowserDownload(blob, data.filename)
+    await saveMarkdownContent(data.markdown, data.filename)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '导出文摘失败'))
   } finally {
     exportingMarkdown.value = false
   }
 }
 
 function beginMultiExportMode() {
-  ElMessage.info('批量导出入口已保留，后续可以继续细化交互。')
+  if (!filteredArticles.value.length) {
+    ElMessage.info('当前列表没有可选择的文章')
+    return
+  }
+  batchExportMode.value = true
+  batchDigestDialogOpen.value = false
+  batchDigestPreview.value = null
+  selectedBatchArticleIds.value = []
 }
 
 function handleArticleClick(articleId: number) {
+  if (batchExportMode.value) {
+    toggleBatchArticle(articleId)
+    return
+  }
   closeFeedManager()
   void store.selectArticle(articleId)
 }
@@ -825,6 +989,132 @@ function handleArticleClick(articleId: number) {
 function handleExportCommand(command: string) {
   if (command === 'digest') void exportDigest()
   if (command === 'markdown') void exportMarkdown()
+}
+
+function isBatchArticleSelected(articleId: number) {
+  return selectedBatchArticleIdSet.value.has(articleId)
+}
+
+function toggleBatchArticle(articleId: number) {
+  const selected = new Set(selectedBatchArticleIds.value)
+  if (selected.has(articleId)) {
+    selected.delete(articleId)
+  } else {
+    selected.add(articleId)
+  }
+  selectedBatchArticleIds.value = Array.from(selected)
+  if (batchDigestDialogOpen.value) {
+    void loadBatchDigestPreview()
+  }
+}
+
+function selectAllBatchArticles() {
+  selectedBatchArticleIds.value = filteredArticles.value.map((article) => article.id)
+  if (batchDigestDialogOpen.value) {
+    void loadBatchDigestPreview()
+  }
+}
+
+function clearBatchSelection() {
+  selectedBatchArticleIds.value = []
+  batchDigestPreview.value = null
+}
+
+function exitBatchExportMode() {
+  batchExportMode.value = false
+  batchDigestDialogOpen.value = false
+  batchDigestPreview.value = null
+  selectedBatchArticleIds.value = []
+}
+
+function selectedBatchArticleIdsInListOrder() {
+  return batchSelectedArticles.value.map((article) => article.id)
+}
+
+async function openBatchDigestDialog() {
+  if (!batchSelectedArticles.value.length) {
+    ElMessage.warning('请先选择要导出的文章')
+    return
+  }
+  batchDigestDialogOpen.value = true
+  await loadBatchDigestPreview()
+}
+
+async function loadBatchDigestPreview() {
+  const articleIds = selectedBatchArticleIdsInListOrder()
+  if (!articleIds.length) {
+    batchDigestPreview.value = null
+    return
+  }
+  batchPreviewLoading.value = true
+  try {
+    batchDigestPreview.value = await rssApi.exportBatchDigestMarkdown({
+      article_ids: articleIds,
+      include_summary: batchIncludeSummary.value,
+      include_note: batchIncludeNote.value,
+      include_full_text: batchIncludeFullText.value
+    })
+  } catch (error) {
+    batchDigestPreview.value = null
+    ElMessage.error(getErrorMessage(error, '生成批量文摘失败'))
+  } finally {
+    batchPreviewLoading.value = false
+  }
+}
+
+async function copyBatchDigestPreview() {
+  const markdown = batchDigestPreview.value?.markdown
+  if (!markdown) return
+  try {
+    await copyText(markdown)
+    ElMessage.success('文摘已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择预览内容复制')
+  }
+}
+
+async function exportBatchDigest() {
+  if (!batchDigestPreview.value) return
+  batchSavingDigest.value = true
+  try {
+    await saveMarkdownContent(batchDigestPreview.value.markdown, batchDigestPreview.value.filename)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '导出批量文摘失败'))
+  } finally {
+    batchSavingDigest.value = false
+  }
+}
+
+async function saveMarkdownContent(markdown: string, filename: string) {
+  if (window.rssReaderDesktop?.saveMarkdown) {
+    const result = await window.rssReaderDesktop.saveMarkdown({
+      content: markdown,
+      suggestedFilename: filename
+    })
+    if (!result.canceled) {
+      ElMessage.success('Markdown 已导出')
+    }
+    return
+  }
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+  triggerBrowserDownload(blob, filename)
+  ElMessage.success('Markdown 已开始下载')
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
 }
 
 function handleListMenuCommand(command: string) {
@@ -1645,6 +1935,49 @@ function exportNote() {
   justify-content: flex-end;
 }
 
+.batch-export-bar {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 26%, var(--app-border) 74%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--app-surface-strong) 90%);
+}
+
+.batch-export-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.batch-export-status strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.batch-export-status span {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, currentColor 62%, transparent 38%);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.batch-export-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.batch-export-actions :deep(.el-button) {
+  margin-left: 0;
+}
+
 .list-menu-button {
   width: 36px;
   height: 36px;
@@ -1658,6 +1991,7 @@ function exportNote() {
 }
 
 .article-card {
+  position: relative;
   margin-bottom: 8px;
   border: 1px solid color-mix(in srgb, var(--app-border) 74%, transparent 26%);
   border-radius: 16px;
@@ -1672,6 +2006,40 @@ function exportNote() {
 .article-card.active {
   background: color-mix(in srgb, var(--theme-accent) 14%, var(--app-surface) 86%);
   border-color: color-mix(in srgb, var(--theme-accent) 36%, var(--app-border) 64%);
+}
+
+.article-card.batch-mode {
+  padding-left: 46px;
+}
+
+.article-card.batch-selected {
+  background: color-mix(in srgb, var(--theme-accent) 16%, var(--app-surface) 84%);
+  border-color: color-mix(in srgb, var(--theme-accent) 44%, var(--app-border) 56%);
+}
+
+.article-select-control {
+  position: absolute;
+  left: 12px;
+  top: 14px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent 18%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-surface) 94%, var(--app-bg) 6%);
+  color: #ffffff;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.article-select-control.checked {
+  border-color: color-mix(in srgb, var(--theme-accent) 76%, var(--app-border) 24%);
+  background: var(--theme-accent);
+}
+
+.article-select-control :deep(.el-icon) {
+  font-size: 14px;
 }
 
 .article-card-meta-row {
@@ -1850,6 +2218,94 @@ function exportNote() {
 .tag-creator-card {
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--app-border) 76%, transparent 24%);
+}
+
+:deep(.note-popover) {
+  max-width: calc(100vw - 32px);
+  border-radius: 8px;
+}
+
+.note-popover-body {
+  display: grid;
+  gap: 12px;
+}
+
+.note-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-popover-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.note-popover-meta {
+  color: color-mix(in srgb, currentColor 52%, transparent 48%);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.note-popover-input :deep(.el-textarea__inner) {
+  min-height: 190px;
+  border-radius: 10px;
+  line-height: 1.6;
+}
+
+.note-actions.note-popover-actions {
+  margin: 0;
+}
+
+.note-actions.note-popover-actions :deep(.el-button) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.batch-digest-body {
+  display: grid;
+  gap: 12px;
+}
+
+.batch-digest-options,
+.batch-digest-meta,
+.batch-digest-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.batch-digest-options {
+  flex-wrap: wrap;
+}
+
+.batch-digest-meta {
+  flex-wrap: wrap;
+  color: color-mix(in srgb, currentColor 62%, transparent 38%);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.batch-digest-alert {
+  margin: 0;
+}
+
+.batch-digest-preview :deep(.el-textarea__inner) {
+  min-height: 360px;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.batch-digest-footer {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.batch-digest-footer :deep(.el-button) {
+  margin-left: 0;
 }
 
 .dropdown-inline-control {
