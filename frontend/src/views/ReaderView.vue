@@ -1,6 +1,6 @@
 <template>
   <div class="reader-shell" :class="readerShellClass">
-    <div class="reader-grid" v-loading="store.loading">
+    <div class="reader-grid" :style="readerGridStyle" v-loading="store.loading">
       <section class="panel sidebar-panel">
         <div class="sidebar-header">
           <h2>订阅与筛选</h2>
@@ -99,6 +99,18 @@
         </el-scrollbar>
       </section>
 
+      <div
+        class="reader-resizer sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-label="store.leftSidebarVisible ? '调整或隐藏订阅栏' : '显示订阅栏'"
+        @pointerdown="startSidebarResize"
+      >
+        <button type="button" class="reader-resizer-toggle" @click.stop="toggleSidebarFromResizer">
+          {{ store.leftSidebarVisible ? '<' : '>' }}
+        </button>
+      </div>
+
       <section v-if="!feedManagerOpen" class="panel scroll-panel article-list-panel">
         <div class="article-list-header">
           <h2>{{ currentListTitle }}</h2>
@@ -189,17 +201,50 @@
           </button>
           <div class="article-card-meta-row">
             <span class="article-card-source">{{ article.feed_title }}</span>
-            <span class="article-card-date">{{ formatArticleDate(article) }}</span>
+            <div class="article-card-meta-right">
+              <span class="article-card-date">{{ formatArticleDate(article) }}</span>
+              <div class="article-card-actions">
+                <el-tooltip :content="article.is_read ? '标记未读' : '标记已读'" placement="top">
+                  <button
+                    type="button"
+                    class="article-action-button"
+                    :class="{ active: article.is_read }"
+                    @click.stop="toggleArticleRead(article)"
+                  >
+                    <el-icon><Check /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip :content="store.isPinned(article.id) ? '取消置顶' : '置顶'" placement="top">
+                  <button
+                    type="button"
+                    class="article-action-button"
+                    :class="{ active: store.isPinned(article.id) }"
+                    @click.stop="store.togglePinned(article.id)"
+                  >
+                    <el-icon><Top /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip :content="article.is_starred ? '取消收藏' : '收藏'" placement="top">
+                  <button
+                    type="button"
+                    class="article-action-button"
+                    :class="{ active: article.is_starred }"
+                    @click.stop="toggleArticleStar(article)"
+                  >
+                    <el-icon><Star /></el-icon>
+                  </button>
+                </el-tooltip>
+              </div>
+            </div>
           </div>
 
           <div class="article-card-main" :class="{ 'with-thumbnail': Boolean(store.showThumbnails && articleThumbnail(article)) }">
             <div class="article-card-copy">
-              <h3 v-html="renderTitleInlineHtml(article.title)"></h3>
+              <h3 class="article-card-title" :class="{ unread: !article.is_read }" v-html="renderTitleInlineHtml(article.title)"></h3>
               <p v-if="articleListSummary(article)" class="article-card-summary" :style="summaryClampStyle">
                 {{ articleListSummary(article) }}
               </p>
               <div class="article-card-tags">
-                <el-tag v-if="!article.is_read" size="small">未读</el-tag>
                 <el-tag v-if="article.is_starred" size="small" type="warning">收藏</el-tag>
                 <el-tag v-if="store.isPinned(article.id)" size="small" effect="plain">置顶</el-tag>
                 <el-tag
@@ -225,17 +270,21 @@
         </article>
       </section>
 
+      <div
+        v-if="!feedManagerOpen"
+        class="reader-resizer article-list-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-label="store.articleListVisible ? '调整或隐藏文章列表' : '显示文章列表'"
+        @pointerdown="startArticleListResize"
+      >
+        <button type="button" class="reader-resizer-toggle" @click.stop="toggleArticleListFromResizer">
+          {{ store.articleListVisible ? '<' : '>' }}
+        </button>
+      </div>
+
       <section v-if="store.selectedArticle && !feedManagerOpen" class="panel reader-detail-panel">
         <div class="toolbar detail-toolbar">
-          <el-tooltip :content="store.selectedArticle.is_read ? '标记未读' : '标记已读'" placement="top">
-            <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_read }" :icon="Check" circle @click="store.toggleRead(store.selectedArticle)" />
-          </el-tooltip>
-          <el-tooltip :content="store.isPinned(store.selectedArticle.id) ? '取消置顶' : '置顶'" placement="top">
-            <el-button class="toolbar-icon-button" :class="{ active: store.isPinned(store.selectedArticle.id) }" :icon="Top" circle @click="togglePinnedSelected" />
-          </el-tooltip>
-          <el-tooltip :content="store.selectedArticle.is_starred ? '取消收藏' : '收藏'" placement="top">
-            <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_starred }" :icon="Star" circle @click="store.toggleStar(store.selectedArticle)" />
-          </el-tooltip>
           <el-popover placement="bottom" :width="320" trigger="click" popper-class="tag-popover">
             <template #reference>
               <el-button class="toolbar-icon-button" :icon="CollectionTag" circle aria-label="标签" title="标签" />
@@ -328,22 +377,24 @@
         </div>
 
         <div class="reader-scroll-area">
-          <header class="reader-hero">
-            <div class="reader-source-row">
-              <span class="reader-source-name">{{ store.selectedArticle.feed_title }}</span>
+          <div class="reader-content-frame">
+            <header class="reader-hero">
+              <div class="reader-source-row">
+                <span class="reader-source-name">{{ store.selectedArticle.feed_title }}</span>
+              </div>
+              <h1 class="reader-title" v-html="renderTitleInlineHtml(store.selectedArticle.title)"></h1>
+              <div class="reader-source-link-row">
+                <a class="reader-source-link" :href="store.selectedArticle.url" target="_blank" rel="noopener noreferrer">
+                  {{ store.selectedArticle.url }}
+                </a>
+              </div>
+              <div class="reader-meta">
+                <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }}</span>
+                <span v-if="readerPublishedAt(store.selectedArticle)">{{ readerPublishedAt(store.selectedArticle) }}</span>
+              </div>
+            </header>
+            <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
             </div>
-            <h1 class="reader-title" v-html="renderTitleInlineHtml(store.selectedArticle.title)"></h1>
-            <div class="reader-source-link-row">
-              <a class="reader-source-link" :href="store.selectedArticle.url" target="_blank" rel="noopener noreferrer">
-                {{ store.selectedArticle.url }}
-              </a>
-            </div>
-            <div class="reader-meta">
-              <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }}</span>
-              <span v-if="readerPublishedAt(store.selectedArticle)">{{ readerPublishedAt(store.selectedArticle) }}</span>
-            </div>
-          </header>
-          <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
         </div>
 
         <!-- 底部摘要抽屉 -->
@@ -425,6 +476,10 @@
               </div>
             </div>
           </div>
+        </div>
+      </section>
+      <section v-else-if="!feedManagerOpen" class="panel reader-detail-panel reader-empty-panel">
+        <div class="reader-empty-state">
         </div>
       </section>
 
@@ -518,6 +573,13 @@ import FeedManageView from './FeedManageView.vue'
 const store = useReaderStore()
 const route = useRoute()
 const router = useRouter()
+const SIDEBAR_WIDTH_KEY = 'rssreader.sidebarWidth'
+const ARTICLE_LIST_WIDTH_KEY = 'rssreader.articleListWidth'
+const SIDEBAR_MIN_WIDTH = 156
+const SIDEBAR_MAX_WIDTH = 360
+const ARTICLE_LIST_MIN_WIDTH = 172
+const ARTICLE_LIST_MAX_WIDTH = 560
+const RESIZER_WIDTH = 20
 const note = ref('')
 const lastSavedNote = ref('')
 const notePopoverOpen = ref(false)
@@ -644,8 +706,22 @@ const syncingAllFeeds = ref(false)
 const homeSyncDialogOpen = ref(false)
 const lastHomeSyncReport = ref<FeedSyncReport | null>(null)
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1440)
+const sidebarWidth = ref(storedPanelWidth(SIDEBAR_WIDTH_KEY, 244, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
+const articleListWidth = ref(storedPanelWidth(ARTICLE_LIST_WIDTH_KEY, 392, ARTICLE_LIST_MIN_WIDTH, ARTICLE_LIST_MAX_WIDTH))
+const suppressNextSidebarToggle = ref(false)
+const suppressNextArticleListToggle = ref(false)
 const NOTE_AUTOSAVE_DELAY_MS = 900
 let noteSaveTimer: number | undefined
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function storedPanelWidth(key: string, fallback: number, min: number, max: number) {
+  const raw = localStorage.getItem(key)
+  const value = raw ? Number(raw) : fallback
+  return Number.isFinite(value) ? clampNumber(value, min, max) : fallback
+}
 
 const renderedArticleHtml = computed(() => {
   const article = store.selectedArticle
@@ -748,9 +824,25 @@ const noteSaveStatusText = computed(() => {
   return '自动保存'
 })
 const homeSyncResults = computed(() => lastHomeSyncReport.value?.results ?? [])
+const isSidebarHidden = computed(() => !store.leftSidebarVisible || viewportWidth.value <= 1220)
+const isArticleListHidden = computed(() =>
+  !store.articleListVisible || (viewportWidth.value <= 900 && Boolean(store.selectedArticle) && !feedManagerOpen.value)
+)
+const readerGridStyle = computed(() => ({
+  gridTemplateColumns: [
+    isSidebarHidden.value ? '0px' : `${sidebarWidth.value}px`,
+    `${RESIZER_WIDTH}px`,
+    isArticleListHidden.value || feedManagerOpen.value ? '0px' : `${articleListWidth.value}px`,
+    feedManagerOpen.value ? '0px' : `${RESIZER_WIDTH}px`,
+    'minmax(0, 1fr)'
+  ].join(' ')
+}))
 const readerShellClass = computed(() => ({
-  'sidebar-hidden': viewportWidth.value <= 1220,
-  'article-list-hidden': viewportWidth.value <= 900 && Boolean(store.selectedArticle) && !feedManagerOpen.value
+  'sidebar-hidden': isSidebarHidden.value,
+  'article-list-hidden': isArticleListHidden.value,
+  'sidebar-compact': !isSidebarHidden.value && sidebarWidth.value < 210,
+  'article-list-compact': !isArticleListHidden.value && articleListWidth.value < 260,
+  'article-list-micro': !isArticleListHidden.value && articleListWidth.value < 210
 }))
 
 onMounted(async () => {
@@ -837,6 +929,104 @@ async function handleBackgroundSync() {
 
 function handleWindowResize() {
   viewportWidth.value = window.innerWidth
+}
+
+function toggleSidebarVisible() {
+  store.setLeftSidebarVisible(!store.leftSidebarVisible)
+}
+
+function toggleArticleListVisible() {
+  if (store.articleListVisible && !store.selectedArticle && filteredArticles.value[0]) {
+    void store.selectArticle(filteredArticles.value[0].id)
+  }
+  store.setArticleListVisible(!store.articleListVisible)
+}
+
+function toggleSidebarFromResizer() {
+  if (suppressNextSidebarToggle.value) {
+    suppressNextSidebarToggle.value = false
+    return
+  }
+  toggleSidebarVisible()
+}
+
+function toggleArticleListFromResizer() {
+  if (suppressNextArticleListToggle.value) {
+    suppressNextArticleListToggle.value = false
+    return
+  }
+  toggleArticleListVisible()
+}
+
+function startSidebarResize(event: PointerEvent) {
+  if (isArticleListHidden.value && isSidebarHidden.value) {
+    startPanelResize('article-list', event)
+    return
+  }
+  startPanelResize('sidebar', event)
+}
+
+function startArticleListResize(event: PointerEvent) {
+  startPanelResize('article-list', event)
+}
+
+function startPanelResize(kind: 'sidebar' | 'article-list', event: PointerEvent) {
+  if (event.button !== 0) return
+  event.preventDefault()
+
+  const startX = event.clientX
+  const startWidth = kind === 'sidebar'
+    ? (store.leftSidebarVisible ? sidebarWidth.value : 0)
+    : (store.articleListVisible ? articleListWidth.value : 0)
+  let moved = false
+  const previousCursor = document.body.style.cursor
+  const previousUserSelect = document.body.style.userSelect
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  const onMove = (moveEvent: PointerEvent) => {
+    const delta = moveEvent.clientX - startX
+    if (Math.abs(delta) > 3) moved = true
+    const next = startWidth + delta
+    if (kind === 'sidebar') {
+      if (next < 80) {
+        store.setLeftSidebarVisible(false)
+        return
+      }
+      const width = clampNumber(next, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+      sidebarWidth.value = width
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+      store.setLeftSidebarVisible(true)
+      return
+    }
+
+    if (next < 100) {
+      store.setArticleListVisible(false)
+      return
+    }
+    const width = clampNumber(next, ARTICLE_LIST_MIN_WIDTH, ARTICLE_LIST_MAX_WIDTH)
+    articleListWidth.value = width
+    localStorage.setItem(ARTICLE_LIST_WIDTH_KEY, String(width))
+    store.setArticleListVisible(true)
+  }
+
+  const onUp = () => {
+    document.body.style.cursor = previousCursor
+    document.body.style.userSelect = previousUserSelect
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    if (moved) {
+      if (kind === 'sidebar') suppressNextSidebarToggle.value = true
+      else suppressNextArticleListToggle.value = true
+      window.setTimeout(() => {
+        suppressNextSidebarToggle.value = false
+        suppressNextArticleListToggle.value = false
+      }, 0)
+    }
+  }
+
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp, { once: true })
 }
 
 async function handleFeedManagerChanged(options?: { reload?: boolean }) {
@@ -1145,6 +1335,18 @@ function handleArticleClick(articleId: number) {
   void store.selectArticle(articleId)
 }
 
+function toggleArticleRead(article: Article) {
+  void store.toggleRead(article).catch((error) => {
+    ElMessage.error(getErrorMessage(error, '更新已读状态失败'))
+  })
+}
+
+function toggleArticleStar(article: Article) {
+  void store.toggleStar(article).catch((error) => {
+    ElMessage.error(getErrorMessage(error, '更新收藏状态失败'))
+  })
+}
+
 function handleExportCommand(command: string) {
   if (command === 'digest') void exportDigest()
   if (command === 'markdown') void exportMarkdown()
@@ -1310,11 +1512,6 @@ function decreaseSummaryLines() {
 
 function increaseSummaryLines() {
   store.setSummaryLineCount(Math.min(5, store.summaryLineCount + 1))
-}
-
-function togglePinnedSelected() {
-  if (!store.selectedArticle) return
-  store.togglePinned(store.selectedArticle.id)
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {
@@ -1649,7 +1846,84 @@ async function exportNote() {
 }
 
 .reader-shell.sidebar-hidden .feed-manager-overlay {
-  grid-column: 1 / 3;
+  grid-column: 3 / 6;
+}
+
+.sidebar-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.sidebar-resizer {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.article-list-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.article-list-resizer {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.reader-detail-panel {
+  grid-column: 5;
+  grid-row: 1;
+}
+
+.reader-resizer {
+  position: relative;
+  z-index: 5;
+  height: 100%;
+  min-width: 20px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(50% - 0.5px),
+      color-mix(in srgb, var(--app-border) 86%, transparent 14%) calc(50% - 0.5px),
+      color-mix(in srgb, var(--app-border) 86%, transparent 14%) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px),
+      transparent 100%
+    );
+  transition: background-color 0.18s ease;
+}
+
+.reader-resizer:hover {
+  background-color: color-mix(in srgb, var(--theme-accent) 6%, transparent 94%);
+}
+
+.reader-resizer-toggle {
+  width: 28px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 78%, transparent 22%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-surface-strong) 94%, var(--app-bg) 6%);
+  color: color-mix(in srgb, currentColor 62%, transparent 38%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--app-text) 6%, transparent 94%);
+  transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.reader-resizer-toggle:hover {
+  border-color: color-mix(in srgb, var(--theme-accent) 46%, var(--app-border) 54%);
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--app-surface) 90%);
+  color: var(--theme-accent);
+  transform: scale(1.04);
 }
 
 .sidebar-panel {
@@ -1763,6 +2037,23 @@ async function exportNote() {
   align-content: start;
   padding-bottom: 8px;
   padding-right: 4px;
+}
+
+.reader-shell.sidebar-compact .sidebar-panel {
+  padding-inline: 8px;
+}
+
+.reader-shell.sidebar-compact .sidebar-header h2,
+.reader-shell.sidebar-compact .sidebar-section-title {
+  font-size: 14px;
+}
+
+.reader-shell.sidebar-compact .sidebar-primary-link,
+.reader-shell.sidebar-compact .sidebar-filter-button,
+.reader-shell.sidebar-compact .sidebar-feed-button,
+.reader-shell.sidebar-compact .sidebar-group-toggle {
+  padding-inline: 8px;
+  gap: 6px;
 }
 
 .sidebar-chevron {
@@ -1884,6 +2175,59 @@ async function exportNote() {
   border-width: 0 1px 0 0;
   box-shadow: none;
   padding: 16px 14px 20px;
+}
+
+.reader-shell.article-list-compact .article-list-panel {
+  padding-inline: 10px;
+}
+
+.reader-shell.article-list-compact .article-list-header {
+  gap: 8px;
+}
+
+.reader-shell.article-list-compact .article-list-header h2 {
+  font-size: 15px;
+}
+
+.reader-shell.article-list-compact .article-card {
+  min-height: 74px;
+  padding: 9px 10px;
+}
+
+.reader-shell.article-list-compact .article-card-main.with-thumbnail {
+  grid-template-columns: 1fr;
+}
+
+.reader-shell.article-list-compact .article-card-thumb {
+  display: none;
+}
+
+.reader-shell.article-list-compact .article-card-summary,
+.reader-shell.article-list-micro .article-card-tags,
+.reader-shell.article-list-micro .article-card-source {
+  display: none;
+}
+
+.reader-shell.article-list-compact .article-card-meta-row {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.reader-shell.article-list-compact .article-card-meta-right {
+  justify-content: space-between;
+}
+
+.reader-shell.article-list-compact .article-card-copy h3 {
+  font-size: 13px;
+}
+
+.reader-shell.article-list-compact .article-action-button {
+  width: 22px;
+  height: 22px;
+}
+
+.reader-shell.article-list-micro .article-card-date {
+  text-align: left;
 }
 
 .summary-result-alert {
@@ -2256,6 +2600,10 @@ async function exportNote() {
   transition: all 0.24s ease;
 }
 
+.article-card.pinned {
+  border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--app-border) 62%);
+}
+
 .article-card.active {
   background: color-mix(in srgb, var(--theme-accent) 14%, var(--app-surface) 86%);
   border-color: color-mix(in srgb, var(--theme-accent) 36%, var(--app-border) 64%);
@@ -2297,7 +2645,7 @@ async function exportNote() {
 
 .article-card-meta-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
@@ -2316,6 +2664,46 @@ async function exportNote() {
   line-height: 1.25;
 }
 
+.article-card-meta-right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.article-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.article-action-button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent 30%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-surface-strong) 82%, var(--app-bg) 18%);
+  color: color-mix(in srgb, currentColor 48%, transparent 52%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.article-action-button:hover,
+.article-action-button.active {
+  border-color: color-mix(in srgb, var(--theme-accent) 52%, var(--app-border) 48%);
+  background: color-mix(in srgb, var(--theme-accent) 14%, var(--app-surface) 86%);
+  color: color-mix(in srgb, var(--theme-accent) 86%, currentColor 14%);
+}
+
+.article-action-button :deep(.el-icon) {
+  font-size: 13px;
+}
+
 .article-card-main {
   display: grid;
   grid-template-columns: 1fr;
@@ -2331,8 +2719,14 @@ async function exportNote() {
   margin: 0 0 4px;
   font-size: 14px;
   line-height: 1.35;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: color-mix(in srgb, currentColor 70%, transparent 30%);
+}
+
+.article-card-title.unread {
+  font-weight: 850;
+  color: color-mix(in srgb, var(--app-text) 94%, var(--theme-accent) 6%);
 }
 
 .article-card-summary {
@@ -2387,7 +2781,12 @@ async function exportNote() {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-  padding: 18px 24px 24px;
+  padding: 18px clamp(18px, 4vw, 48px) 24px;
+}
+
+.reader-content-frame {
+  width: min(100%, 760px);
+  margin: 0 auto;
 }
 
 :global(body.theme-dark) .reader-detail-panel {
@@ -2397,38 +2796,42 @@ async function exportNote() {
 .detail-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
   flex-shrink: 0;
-  padding: 18px 24px 0;
-  margin-bottom: 0;
+  width: min(100%, 760px);
+  padding: 16px 0 0;
+  margin: 0 auto;
+  justify-content: flex-end;
 }
 
 .toolbar-icon-button {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
   padding: 0;
-  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 18%, var(--app-surface) 82%);
-  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 24%, var(--app-border) 76%);
-  --el-button-text-color: color-mix(in srgb, currentColor 88%, #435b84 12%);
-  --el-button-hover-bg-color: color-mix(in srgb, var(--theme-accent) 28%, var(--app-surface-strong) 72%);
-  --el-button-hover-border-color: color-mix(in srgb, var(--theme-accent) 42%, var(--app-border) 58%);
-  --el-button-hover-text-color: inherit;
+  --el-button-bg-color: color-mix(in srgb, var(--app-surface-strong) 72%, transparent 28%);
+  --el-button-border-color: color-mix(in srgb, var(--app-border) 72%, transparent 28%);
+  --el-button-text-color: color-mix(in srgb, currentColor 58%, transparent 42%);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--theme-accent) 12%, var(--app-surface) 88%);
+  --el-button-hover-border-color: color-mix(in srgb, var(--theme-accent) 34%, var(--app-border) 66%);
+  --el-button-hover-text-color: color-mix(in srgb, var(--theme-accent) 82%, currentColor 18%);
+  --el-button-active-bg-color: color-mix(in srgb, var(--theme-accent) 16%, var(--app-surface) 84%);
+  box-shadow: none;
+}
+
+.toolbar-icon-button :deep(.el-icon) {
+  font-size: 15px;
 }
 
 :deep(.toolbar-icon-button.active) {
-  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 24%, var(--app-surface) 76%);
-  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 46%, var(--app-border) 54%);
+  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 13%, var(--app-surface) 87%);
+  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--app-border) 62%);
   --el-button-text-color: color-mix(in srgb, var(--theme-accent) 82%, currentColor 18%);
 }
 
 .export-trigger {
-  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 18%, var(--app-surface) 82%);
-  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 24%, var(--app-border) 76%);
-  --el-button-text-color: color-mix(in srgb, currentColor 88%, #435b84 12%);
-  --el-button-hover-bg-color: color-mix(in srgb, var(--theme-accent) 28%, var(--app-surface-strong) 72%);
-  --el-button-hover-border-color: color-mix(in srgb, var(--theme-accent) 42%, var(--app-border) 58%);
+  margin-left: 4px;
 }
 
 .note-toolbar-button {
@@ -2438,10 +2841,10 @@ async function exportNote() {
 .note-toolbar-button.has-note::after {
   content: '';
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 8px;
-  height: 8px;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
   border: 2px solid var(--app-surface);
   border-radius: 999px;
   background: var(--theme-accent);
@@ -2662,7 +3065,7 @@ async function exportNote() {
 }
 
 .feed-manager-overlay {
-  grid-column: 2 / 4;
+  grid-column: 3 / 6;
   grid-row: 1;
   align-self: stretch;
   height: 100%;
@@ -3052,7 +3455,7 @@ async function exportNote() {
   }
 
   .feed-manager-overlay {
-    grid-column: 1;
+    grid-column: 1 / -1;
   }
 }
 </style>

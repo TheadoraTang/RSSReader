@@ -240,3 +240,22 @@ npx.cmd electron-builder --config.asar=false --dir --config.win.target=dir --con
 ```
 
 Result: generated a `Ripple.exe` directory package for configuration verification; the generated `release/win-unpacked` output was cleaned afterward.
+
+## Follow-up: Reader Layout Polish
+
+### Summary
+
+- Added persistent controls for collapsing and restoring the subscription sidebar and article list panel.
+- Replaced the floating controls with draggable splitters on the two column boundaries, supporting click-to-collapse and drag-to-resize behavior.
+- Lowered the article-list minimum width and added compact/micro list layouts so the second column can be resized independently.
+- Restyled the article detail toolbar into a smaller right-aligned icon group matching the reading content width.
+- Moved read/unread, pin, and favorite actions into article cards so the article detail toolbar stays focused on detail-only actions.
+- Updated article list read state styling so unread articles are indicated by stronger/darker title text.
+- Constrained the article detail content to a centered fixed reading width for a calmer reading surface.
+
+### Verification
+
+```bash
+cd frontend
+.\node_modules\.bin\vue-tsc.cmd --noEmit
+```

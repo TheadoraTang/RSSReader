@@ -395,3 +395,15 @@
 - Updated Electron Builder metadata so packaged desktop builds use `productName: Ripple` and the NSIS installer/uninstaller use `build/icon.ico`.
 - Updated the Electron window title/name/icon and frontend title, favicon, header logo, and i18n app name to Ripple.
 - Verification: frontend type check passed; frontend build passed with existing Vite/Rollup warnings; a lightweight Electron Builder directory package produced `Ripple.exe` and was cleaned afterward.
+
+## 2026-06-15 (Reader layout polish)
+
+- Used AI Coding Agent to refine the reader page layout and reduce detail-toolbar density.
+- Moved read, pin, and favorite quick actions from the article detail toolbar into each article card.
+- Changed unread/read distinction in the article list to title color and weight instead of relying on a separate unread tag.
+- Added persistent sidebar and article-list visibility toggles so the three reader columns can be collapsed and restored.
+- Constrained the article detail content to a centered fixed reading width while keeping the full-height reading panel.
+- Replaced the floating layout buttons with draggable column splitters between subscription/list/detail panels; each splitter can click to collapse or drag to resize.
+- Refined the article list splitter so the second column can shrink independently into compact and micro layouts without leaving unused blank space.
+- Restyled the article detail toolbar as a smaller right-aligned icon group within the reading width to reduce visual weight.
+- Verification: frontend type check passed.
