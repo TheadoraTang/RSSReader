@@ -2,9 +2,9 @@
   <div class="reader-shell" :class="readerShellClass">
     <div class="reader-grid" :style="readerGridStyle">
       <section class="panel sidebar-panel">
-        <div class="sidebar-header">
-          <h2>订阅与筛选</h2>
-        </div>
+<!--        <div class="sidebar-header">-->
+<!--          <h2>订阅与筛选</h2>-->
+<!--        </div>-->
 
         <div class="sidebar-static-filters">
           <button
@@ -52,25 +52,25 @@
         </div>
 
         <div class="sidebar-section-header">
-          <span class="sidebar-section-title">订阅源</span>
-          <div class="sidebar-section-actions">
-            <button type="button" class="sidebar-section-action" aria-label="添加订阅源" @click="openFeedManager">
-              <el-icon><Plus /></el-icon>
-            </button>
-            <el-dropdown trigger="click" @command="handleFeedSectionCommand">
-              <button type="button" class="sidebar-section-action" aria-label="订阅源更多操作">
-                <el-icon><MoreFilled /></el-icon>
-              </button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="manage-feeds">管理订阅源</el-dropdown-item>
-                  <el-dropdown-item command="sync-feeds" :disabled="syncingAllFeeds">
-                    {{ syncingAllFeeds ? '正在同步全部' : '同步全部订阅' }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
+<!--          <span class="sidebar-section-title">订阅源</span>-->
+<!--          <div class="sidebar-section-actions">-->
+<!--            <button type="button" class="sidebar-section-action" aria-label="添加订阅源" @click="openFeedManager">-->
+<!--              <el-icon><Plus /></el-icon>-->
+<!--            </button>-->
+<!--            <el-dropdown trigger="click" @command="handleFeedSectionCommand">-->
+<!--              <button type="button" class="sidebar-section-action" aria-label="订阅源更多操作">-->
+<!--                <el-icon><MoreFilled /></el-icon>-->
+<!--              </button>-->
+<!--              <template #dropdown>-->
+<!--                <el-dropdown-menu>-->
+<!--                  <el-dropdown-item command="manage-feeds">管理订阅源</el-dropdown-item>-->
+<!--                  <el-dropdown-item command="sync-feeds" :disabled="syncingAllFeeds">-->
+<!--                    {{ syncingAllFeeds ? '正在同步全部' : '同步全部订阅' }}-->
+<!--                  </el-dropdown-item>-->
+<!--                </el-dropdown-menu>-->
+<!--              </template>-->
+<!--            </el-dropdown>-->
+<!--          </div>-->
         </div>
         <el-scrollbar class="sidebar-feed-scrollbar">
           <div class="sidebar-group-content sidebar-feed-list">

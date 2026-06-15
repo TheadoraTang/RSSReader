@@ -1,8 +1,8 @@
 <template>
   <div class="stats-page">
-    <div class="page-title">
-      <h1>统计日志</h1>
-    </div>
+<!--    <div class="page-title">-->
+<!--      <h1>统计日志</h1>-->
+<!--    </div>-->
     <div class="stats-grid">
       <section class="panel stats-summary-panel">
         <div class="stats-panel-head">

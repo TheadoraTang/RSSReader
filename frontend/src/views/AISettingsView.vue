@@ -1,8 +1,8 @@
 <template>
   <div class="ai-settings-page">
-    <div class="page-title">
-      <h1>AI 设置</h1>
-    </div>
+<!--    <div class="page-title">-->
+<!--      <h1>AI 设置</h1>-->
+<!--    </div>-->
 
     <section class="panel">
       <h2 class="section-title">Summary Agent Provider</h2>
