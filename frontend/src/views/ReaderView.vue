@@ -1,6 +1,6 @@
 <template>
   <div class="reader-shell" :class="readerShellClass">
-    <div class="reader-grid" :style="readerGridStyle" v-loading="store.loading">
+    <div class="reader-grid" :style="readerGridStyle">
       <section class="panel sidebar-panel">
         <div class="sidebar-header">
           <h2>订阅与筛选</h2>
@@ -41,7 +41,7 @@
             type="button"
             class="sidebar-filter-button"
             :class="{ active: activeTagId === tag.id }"
-            @click="activeTagId = activeTagId === tag.id ? null : tag.id"
+            @click="applyTagFilter(activeTagId === tag.id ? null : tag.id)"
           >
             <span class="tag-filter-label">
               <span class="tag-dot" :style="{ background: tag.color }"></span>
@@ -111,7 +111,7 @@
         </button>
       </div>
 
-      <section v-if="!feedManagerOpen" class="panel scroll-panel article-list-panel">
+      <section v-if="!feedManagerOpen" class="panel scroll-panel article-list-panel" @scroll.passive="handleArticleListScroll">
         <div class="article-list-header">
           <h2>{{ currentListTitle }}</h2>
           <div class="article-list-topbar-right">
@@ -177,6 +177,10 @@
           </div>
         </div>
 
+        <div v-if="store.loading && filteredArticles.length === 0" class="article-list-loading">
+          <el-icon class="article-list-loading-icon"><Loading /></el-icon>
+          <span>正在加载文章</span>
+        </div>
         <article
           v-for="article in filteredArticles"
           :key="article.id"
@@ -268,6 +272,14 @@
             </div>
           </div>
         </article>
+        <div v-if="store.pagination.hasMore || store.loadingMore" class="article-list-load-more">
+          <el-button :loading="store.loadingMore" @click="loadMoreArticles">
+            {{ store.loadingMore ? '正在加载' : '加载更多' }}
+          </el-button>
+        </div>
+        <div v-else-if="!store.loading && filteredArticles.length === 0" class="article-list-empty">
+          当前列表没有文章
+        </div>
       </section>
 
       <div
@@ -564,8 +576,9 @@ import { Check, Close, CollectionTag, CopyDocument, Download, EditPen, Files, Lo
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Article, BatchDigestExportResponse, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
+import type { Article, ArticleListItem, BatchDigestExportResponse, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
 import { getErrorMessage, rssApi } from '../api/client'
+import type { ArticleListQuery } from '../stores/reader'
 import { useReaderStore } from '../stores/reader'
 import { apiErrorMessage, showSyncReportMessage, statusTagType, syncSuggestion } from '../utils/syncDiagnostics'
 import FeedManageView from './FeedManageView.vue'
@@ -700,7 +713,6 @@ const batchIncludeFullText = ref(false)
 const newTagName = ref('')
 const newTagColor = ref('#5b8def')
 const failedThumbnailKeys = ref<Set<string>>(new Set())
-const stableArticleThumbnails = ref<Record<number, string>>({})
 const failedFeedIconIds = ref<Set<number>>(new Set())
 const syncingAllFeeds = ref(false)
 const homeSyncDialogOpen = ref(false)
@@ -734,9 +746,9 @@ const renderedArticleHtml = computed(() => {
 
 const selectedArticleTagIds = computed(() => store.selectedArticle?.tag_ids ?? [])
 const quickFilters = computed(() => [
-  { key: 'all' as const, label: '全部文章', count: store.articles.length },
-  { key: 'unread' as const, label: '未读文章', count: store.articles.filter((article) => !article.is_read).length },
-  { key: 'starred' as const, label: '收藏', count: store.articles.filter((article) => article.is_starred).length }
+  { key: 'all' as const, label: '全部文章', count: store.articleCounts.total },
+  { key: 'unread' as const, label: '未读文章', count: store.articleCounts.unread },
+  { key: 'starred' as const, label: '收藏', count: store.articleCounts.starred }
 ])
 
 const activeFeedForMenu = computed(() => {
@@ -745,17 +757,16 @@ const activeFeedForMenu = computed(() => {
   return null
 })
 
-const filteredArticles = computed(() => {
-  let list = [...store.articles]
-  if (activeFilterKey.value === 'unread') list = list.filter((article) => !article.is_read)
-  if (activeFilterKey.value === 'starred') list = list.filter((article) => article.is_starred)
-  if (activeFeedId.value !== null) list = list.filter((article) => article.feed_id === activeFeedId.value)
-  if (activeTagId.value !== null) {
-    const tagId = activeTagId.value
-    list = list.filter((article) => article.tag_ids.includes(tagId))
-  }
-  return list
+const activeArticleQuery = computed<ArticleListQuery>(() => {
+  const query: ArticleListQuery = { sort_order: store.articleSortOrder }
+  if (activeFeedId.value !== null) query.feed_id = activeFeedId.value
+  if (activeTagId.value !== null) query.tag_id = activeTagId.value
+  if (activeFilterKey.value === 'unread') query.unread = true
+  if (activeFilterKey.value === 'starred') query.starred = true
+  return query
 })
+
+const filteredArticles = computed(() => store.articleItems)
 
 const selectedBatchArticleIdSet = computed(() => new Set(selectedBatchArticleIds.value))
 const batchSelectedArticles = computed(() =>
@@ -849,7 +860,7 @@ onMounted(async () => {
   window.addEventListener('rssreader:background-sync', handleBackgroundSync)
   window.addEventListener('resize', handleWindowResize)
   handleWindowResize()
-  await store.loadAll()
+  await reloadArticleList()
   await loadSummaryProviders()
   const articleId = route.query.article
   if (articleId) {
@@ -857,7 +868,7 @@ onMounted(async () => {
     void router.replace({ path: '/', query: { ...route.query, article: undefined } })
   }
   await loadNote()
-  ensureVisibleSelection()
+  await ensureVisibleSelection()
 })
 
 onUnmounted(() => {
@@ -892,20 +903,9 @@ watch(notePopoverOpen, (open) => {
   }
 })
 watch(renderedArticleHtml, decorateArticleLinks, { flush: 'post' })
-watch(
-  () => store.articles,
-  (articles) => {
-    stableArticleThumbnails.value = articles.reduce<Record<number, string>>((cache, article) => {
-      const current = cache[article.id]
-      if (current) return cache
-      const src = extractImageSrc(article.cleaned_html || article.raw_html || '')
-      if (src) cache[article.id] = src
-      return cache
-    }, { ...stableArticleThumbnails.value })
-  },
-  { immediate: true }
-)
-watch(filteredArticles, ensureVisibleSelection)
+watch(filteredArticles, () => {
+  void ensureVisibleSelection()
+})
 watch(filteredArticles, (articles) => {
   if (!batchExportMode.value) return
   const articleIds = new Set(articles.map((article) => article.id))
@@ -923,7 +923,7 @@ watch(
 )
 
 async function handleBackgroundSync() {
-  await store.loadAll()
+  await reloadArticleList()
   await loadNote()
 }
 
@@ -1031,11 +1031,30 @@ function startPanelResize(kind: 'sidebar' | 'article-list', event: PointerEvent)
 
 async function handleFeedManagerChanged(options?: { reload?: boolean }) {
   if (options?.reload !== false) {
-    await store.loadAll()
+    await reloadArticleList()
+  } else {
+    await store.loadCounts()
   }
   await loadNote()
   if (activeFeedId.value !== null && !store.feeds.some((feed) => feed.id === activeFeedId.value)) {
     activeFeedId.value = null
+  }
+}
+
+async function reloadArticleList() {
+  await store.loadAll(activeArticleQuery.value)
+}
+
+async function loadMoreArticles() {
+  await store.loadMore(activeArticleQuery.value)
+}
+
+function handleArticleListScroll(event: Event) {
+  const target = event.currentTarget as HTMLElement | null
+  if (!target || store.loadingMore || !store.pagination.hasMore) return
+  const remaining = target.scrollHeight - target.scrollTop - target.clientHeight
+  if (remaining < 240) {
+    void loadMoreArticles()
   }
 }
 
@@ -1084,13 +1103,13 @@ async function decorateArticleLinks() {
   })
 }
 
-function ensureVisibleSelection() {
+async function ensureVisibleSelection() {
   if (!filteredArticles.value.length) {
     store.selectedArticle = null
     return
   }
   if (!filteredArticles.value.find((article) => article.id === store.selectedArticle?.id)) {
-    store.selectedArticle = filteredArticles.value[0]
+    await store.selectArticle(filteredArticles.value[0].id, { markRead: false })
   }
 }
 
@@ -1100,6 +1119,7 @@ function applyQuickFilter(key: 'all' | 'unread' | 'starred') {
   activeFeedId.value = null
   activeTagId.value = null
   closeFeedManager()
+  void reloadArticleList()
 }
 
 function applyFeedFilter(feedId: number | null) {
@@ -1108,6 +1128,16 @@ function applyFeedFilter(feedId: number | null) {
   activeTagId.value = null
   activeFilterKey.value = 'all'
   closeFeedManager()
+  void reloadArticleList()
+}
+
+function applyTagFilter(tagId: number | null) {
+  exitBatchExportMode()
+  activeTagId.value = tagId
+  activeFeedId.value = null
+  activeFilterKey.value = 'all'
+  closeFeedManager()
+  void reloadArticleList()
 }
 
 function openFeedManager() {
@@ -1128,26 +1158,26 @@ function closeFeedManager() {
 }
 
 function tagArticleCount(tagId: number) {
-  return store.articles.filter((article) => article.tag_ids.includes(tagId)).length
+  return store.articleCounts.by_tag[tagId] ?? 0
 }
 
 function tagName(tagId: number) {
   return store.tags.find((tag) => tag.id === tagId)?.name ?? '标签'
 }
 
-function articleThumbnail(article: Article) {
-  const src = stableArticleThumbnails.value[article.id] || extractImageSrc(article.cleaned_html || article.raw_html || '')
+function articleThumbnail(article: ArticleListItem) {
+  const src = extractImageSrc(article.summary || '')
   if (!src || failedThumbnailKeys.value.has(thumbnailKey(article, src))) return null
   return src
 }
 
-function handleThumbnailError(article: Article) {
+function handleThumbnailError(article: ArticleListItem) {
   const src = articleThumbnail(article)
   if (!src) return
   failedThumbnailKeys.value = new Set([...failedThumbnailKeys.value, thumbnailKey(article, src)])
 }
 
-function thumbnailKey(article: Article, src: string) {
+function thumbnailKey(article: ArticleListItem, src: string) {
   return `${article.id}:${src}`
 }
 
@@ -1156,7 +1186,7 @@ function handleFeedIconError(feedId: number) {
 }
 
 function feedArticleCount(feedId: number) {
-  return store.articles.filter((article) => article.feed_id === feedId).length
+  return store.articleCounts.by_feed[feedId] ?? 0
 }
 
 function feedFaviconUrl(feed: { id: number; site_url?: string; url: string }) {
@@ -1170,8 +1200,8 @@ function extractImageSrc(html: string) {
   return matched?.[1] ?? null
 }
 
-function articleListSummary(article: Article) {
-  const source = article.summary || article.cleaned_html || article.raw_html || ''
+function articleListSummary(article: ArticleListItem) {
+  const source = article.summary || ''
   const text = htmlToPlainText(source)
   return text.length > 180 ? `${text.slice(0, 180).trim()}...` : text
 }
@@ -1182,7 +1212,7 @@ function htmlToPlainText(value: string) {
   return (document.body.textContent || value).replace(/\s+/g, ' ').trim()
 }
 
-function formatArticleDate(article: Article) {
+function formatArticleDate(article: ArticleListItem) {
   const source = article.published_at || article.created_at
   if (!source) return ''
   const date = new Date(source)
@@ -1215,6 +1245,9 @@ async function createTag() {
 async function updateSelectedArticleTags(tagIds: number[]) {
   if (!store.selectedArticle) return
   await store.setArticleTags(store.selectedArticle.id, tagIds)
+  if (activeTagId.value !== null) {
+    await reloadArticleList()
+  }
 }
 
 async function toggleSelectedArticleTag(tagId: number) {
@@ -1332,19 +1365,29 @@ function handleArticleClick(articleId: number) {
     return
   }
   closeFeedManager()
-  void store.selectArticle(articleId)
+  void store.selectArticle(articleId, { markRead: true })
 }
 
-function toggleArticleRead(article: Article) {
-  void store.toggleRead(article).catch((error) => {
-    ElMessage.error(getErrorMessage(error, '更新已读状态失败'))
-  })
+function toggleArticleRead(article: ArticleListItem) {
+  void store
+    .toggleRead(article)
+    .then(() => {
+      if (activeFilterKey.value === 'unread') void reloadArticleList()
+    })
+    .catch((error) => {
+      ElMessage.error(getErrorMessage(error, '更新已读状态失败'))
+    })
 }
 
-function toggleArticleStar(article: Article) {
-  void store.toggleStar(article).catch((error) => {
-    ElMessage.error(getErrorMessage(error, '更新收藏状态失败'))
-  })
+function toggleArticleStar(article: ArticleListItem) {
+  void store
+    .toggleStar(article)
+    .then(() => {
+      if (activeFilterKey.value === 'starred') void reloadArticleList()
+    })
+    .catch((error) => {
+      ElMessage.error(getErrorMessage(error, '更新收藏状态失败'))
+    })
 }
 
 function handleExportCommand(command: string) {
@@ -1487,8 +1530,14 @@ async function copyText(text: string) {
 function handleListMenuCommand(command: string) {
   if (command === 'sync') void syncAll()
   if (command === 'batch-export') beginMultiExportMode()
-  if (command === 'sort:newest') store.setArticleSortOrder('newest')
-  if (command === 'sort:oldest') store.setArticleSortOrder('oldest')
+  if (command === 'sort:newest') {
+    store.setArticleSortOrder('newest')
+    void reloadArticleList()
+  }
+  if (command === 'sort:oldest') {
+    store.setArticleSortOrder('oldest')
+    void reloadArticleList()
+  }
   if (command === 'toggle:thumbnails') store.setShowThumbnails(!store.showThumbnails)
   if (command === 'unsubscribe') void unsubscribeCurrentFeed()
 }
@@ -1502,8 +1551,8 @@ async function unsubscribeCurrentFeed() {
   const feed = activeFeedForMenu.value
   if (!feed) return
   await rssApi.deleteFeed(feed.id)
-  await store.loadAll()
   activeFeedId.value = null
+  await reloadArticleList()
 }
 
 function decreaseSummaryLines() {
@@ -1788,7 +1837,7 @@ async function syncAll() {
   try {
     const report = await rssApi.syncAll()
     lastHomeSyncReport.value = report
-    await store.loadAll()
+    await reloadArticleList()
     await loadNote()
     showSyncReportMessage(report)
     if (report.failed > 0) {
@@ -2743,6 +2792,31 @@ async function exportNote() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.article-list-load-more,
+.article-list-empty,
+.article-list-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  padding: 12px 0 18px;
+  color: color-mix(in srgb, currentColor 58%, transparent 42%);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.article-list-loading {
+  gap: 8px;
+}
+
+.article-list-loading-icon {
+  animation: summary-icon-spin 0.9s linear infinite;
+}
+
+.article-list-load-more :deep(.el-button) {
+  min-width: 112px;
 }
 
 .article-card-thumb {

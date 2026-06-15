@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { Article, Feed, rssApi, Tag } from '../api/client'
+import { Article, ArticleCounts, ArticleListItem, Feed, rssApi, Tag } from '../api/client'
 
 const PINNED_ARTICLES_KEY = 'rssreader.pinnedArticleIds'
 const SUMMARY_LINES_KEY = 'rssreader.summaryLineCount'
@@ -10,11 +10,18 @@ const FILTER_PANEL_EXPANDED_KEY = 'rssreader.filterPanelExpanded'
 const FEED_PANEL_EXPANDED_KEY = 'rssreader.feedPanelExpanded'
 const TAG_PANEL_EXPANDED_KEY = 'rssreader.tagPanelExpanded'
 const ARTICLE_SORT_ORDER_KEY = 'rssreader.articleSortOrder'
-const ARTICLE_TAG_OVERRIDES_KEY = 'rssreader.articleTagOverrides'
+
+export const ARTICLE_PAGE_SIZE = 50
 
 type SortOrder = 'newest' | 'oldest'
 
-type ArticleTagOverrides = Record<number, number[]>
+export interface ArticleListQuery {
+  feed_id?: number
+  tag_id?: number
+  unread?: boolean
+  starred?: boolean
+  sort_order?: SortOrder
+}
 
 function storedJsonArray(key: string): number[] {
   const raw = localStorage.getItem(key)
@@ -43,21 +50,28 @@ function storedSortOrder(): SortOrder {
   return localStorage.getItem(ARTICLE_SORT_ORDER_KEY) === 'oldest' ? 'oldest' : 'newest'
 }
 
-function storedArticleTagOverrides(): ArticleTagOverrides {
-  const raw = localStorage.getItem(ARTICLE_TAG_OVERRIDES_KEY)
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return {}
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([, value]) => Array.isArray(value))
-    ) as ArticleTagOverrides
-  } catch {
-    return {}
+function emptyCounts(): ArticleCounts {
+  return { total: 0, unread: 0, starred: 0, by_feed: {}, by_tag: {} }
+}
+
+function toListItem(article: Article): ArticleListItem {
+  return {
+    id: article.id,
+    feed_id: article.feed_id,
+    feed_title: article.feed_title,
+    title: article.title,
+    url: article.url,
+    author: article.author,
+    published_at: article.published_at,
+    summary: article.summary,
+    is_read: article.is_read,
+    is_starred: article.is_starred,
+    tag_ids: article.tag_ids,
+    created_at: article.created_at
   }
 }
 
-function sortArticles(articles: Article[], pinnedArticleIds: number[], sortOrder: SortOrder) {
+function sortArticles(articles: ArticleListItem[], pinnedArticleIds: number[], sortOrder: SortOrder) {
   const pinned = new Set(pinnedArticleIds)
   return [...articles].sort((left, right) => {
     const leftPinned = pinned.has(left.id)
@@ -75,10 +89,23 @@ function sortArticles(articles: Article[], pinnedArticleIds: number[], sortOrder
 export const useReaderStore = defineStore('reader', {
   state: () => ({
     feeds: [] as Feed[],
-    articles: [] as Article[],
+    articleItems: [] as ArticleListItem[],
     tags: [] as Tag[],
     selectedArticle: null as Article | null,
+    articleCounts: emptyCounts(),
+    feedArticleCache: {} as Record<number, ArticleListItem[]>,
+    pagination: {
+      limit: ARTICLE_PAGE_SIZE,
+      offset: 0,
+      total: 0,
+      hasMore: false
+    },
+    detailCache: {} as Record<number, Article>,
     loading: false,
+    loadingMore: false,
+    loadRequestId: 0,
+    countsRequestId: 0,
+    protectedFeedCounts: {} as Record<number, number>,
     articleMutationVersion: 0,
     pinnedArticleIds: storedJsonArray(PINNED_ARTICLES_KEY),
     summaryLineCount: storedSummaryLines(),
@@ -88,37 +115,37 @@ export const useReaderStore = defineStore('reader', {
     filterPanelExpanded: storedBoolean(FILTER_PANEL_EXPANDED_KEY, true),
     feedPanelExpanded: storedBoolean(FEED_PANEL_EXPANDED_KEY, true),
     tagPanelExpanded: storedBoolean(TAG_PANEL_EXPANDED_KEY, true),
-    articleSortOrder: storedSortOrder(),
-    articleTagOverrides: storedArticleTagOverrides()
+    articleSortOrder: storedSortOrder()
   }),
+  getters: {
+    articles: (state) => state.articleItems
+  },
   actions: {
-    async loadAll() {
+    async loadAll(query: ArticleListQuery = {}) {
+      if (query.feed_id !== undefined && this.loadCachedFeedArticles(query.feed_id)) return
+
+      const requestId = this.loadRequestId + 1
+      const countsRequestId = this.countsRequestId + 1
+      this.loadRequestId = requestId
+      this.countsRequestId = countsRequestId
       this.loading = true
-      const articleMutationVersion = this.articleMutationVersion
+      this.articleItems = []
+      this.pagination = { limit: ARTICLE_PAGE_SIZE, offset: 0, total: 0, hasMore: false }
       try {
-        const [feeds, articles, tags] = await Promise.allSettled([rssApi.feeds(), rssApi.articles(), rssApi.tags()])
+        const normalizedQuery = this.withSort(query)
+        const [feeds, articles, tags, counts] = await Promise.allSettled([
+          rssApi.feeds(),
+          rssApi.articles({ ...normalizedQuery, limit: ARTICLE_PAGE_SIZE, offset: 0 }),
+          rssApi.tags(),
+          rssApi.articleCounts()
+        ])
+
+        if (requestId !== this.loadRequestId) return
 
         if (feeds.status === 'fulfilled') {
           this.feeds = feeds.value
         } else {
           console.error('Failed to load feeds', feeds.reason)
-        }
-
-        if (articles.status === 'fulfilled') {
-          if (this.articleMutationVersion === articleMutationVersion) {
-            this.articles = sortArticles(
-              articles.value.map((article) => this.applyArticleOverrides(article)),
-              this.pinnedArticleIds,
-              this.articleSortOrder
-            )
-            this.articleMutationVersion += 1
-          } else {
-            this.mergeArticles(articles.value)
-          }
-        } else {
-          console.error('Failed to load articles', articles.reason)
-          this.articles = []
-          this.articleMutationVersion += 1
         }
 
         if (tags.status === 'fulfilled') {
@@ -128,48 +155,169 @@ export const useReaderStore = defineStore('reader', {
           this.tags = []
         }
 
-        this.selectedArticle = this.articles[0] ?? null
+        if (counts.status === 'fulfilled' && countsRequestId === this.countsRequestId) {
+          this.applyArticleCounts(counts.value)
+        } else if (counts.status === 'rejected') {
+          console.error('Failed to load article counts', counts.reason)
+          this.articleCounts = emptyCounts()
+        }
+
+        if (articles.status === 'fulfilled') {
+          this.articleItems = sortArticles(articles.value.items, this.pinnedArticleIds, this.articleSortOrder)
+          this.pagination = {
+            limit: articles.value.limit,
+            offset: articles.value.offset + articles.value.items.length,
+            total: articles.value.total,
+            hasMore: articles.value.has_more
+          }
+          this.articleMutationVersion += 1
+        } else {
+          console.error('Failed to load articles', articles.reason)
+          this.articleItems = []
+          this.pagination = { limit: ARTICLE_PAGE_SIZE, offset: 0, total: 0, hasMore: false }
+          this.articleMutationVersion += 1
+        }
+
+        await this.ensureSelectedArticle()
       } finally {
-        this.loading = false
+        if (requestId === this.loadRequestId) this.loading = false
       }
     },
-    async selectArticle(id: number) {
-      const article = this.applyArticleOverrides(await rssApi.article(id))
+    async loadMore(query: ArticleListQuery = {}) {
+      if (this.loading || this.loadingMore || !this.pagination.hasMore) return
+      this.loadingMore = true
+      try {
+        const page = await rssApi.articles({
+          ...this.withSort(query),
+          limit: this.pagination.limit,
+          offset: this.pagination.offset
+        })
+        const existingIds = new Set(this.articleItems.map((article) => article.id))
+        const nextItems = page.items.filter((article) => !existingIds.has(article.id))
+        this.articleItems = sortArticles([...this.articleItems, ...nextItems], this.pinnedArticleIds, this.articleSortOrder)
+        this.pagination = {
+          limit: page.limit,
+          offset: page.offset + page.items.length,
+          total: page.total,
+          hasMore: page.has_more
+        }
+        this.articleMutationVersion += 1
+      } finally {
+        this.loadingMore = false
+      }
+    },
+    async loadCounts() {
+      const requestId = this.countsRequestId + 1
+      this.countsRequestId = requestId
+      const counts = await rssApi.articleCounts()
+      if (requestId === this.countsRequestId) {
+        this.applyArticleCounts(counts)
+      }
+    },
+    loadCachedFeedArticles(feedId: number) {
+      const cachedArticles = this.feedArticleCache[feedId]
+      if (!cachedArticles?.length) return false
+
+      this.loadRequestId += 1
+      this.loading = false
+      this.articleItems = sortArticles(cachedArticles, this.pinnedArticleIds, this.articleSortOrder)
+      this.pagination = {
+        limit: ARTICLE_PAGE_SIZE,
+        offset: this.articleItems.length,
+        total: cachedArticles.length,
+        hasMore: false
+      }
+      this.setFeedArticleCount(feedId, cachedArticles.length)
+      this.articleMutationVersion += 1
+      void this.ensureSelectedArticle()
+      return true
+    },
+    cacheFeedArticles(feedId: number, articles: Article[]) {
+      const articleItems = articles.map(toListItem)
+      this.feedArticleCache = {
+        ...this.feedArticleCache,
+        [feedId]: sortArticles(articleItems, this.pinnedArticleIds, this.articleSortOrder)
+      }
+      this.detailCache = {
+        ...this.detailCache,
+        ...Object.fromEntries(articles.map((article) => [article.id, article]))
+      }
+      this.setFeedArticleCount(feedId, articles.length)
+    },
+    applyArticleCounts(counts: ArticleCounts) {
+      const nextCounts: ArticleCounts = {
+        ...counts,
+        by_feed: { ...counts.by_feed },
+        by_tag: { ...counts.by_tag }
+      }
+      const remainingProtectedCounts: Record<number, number> = {}
+      Object.entries(this.protectedFeedCounts).forEach(([key, protectedCount]) => {
+        const feedId = Number(key)
+        const backendCount = nextCounts.by_feed[feedId] ?? 0
+        if (backendCount < protectedCount) {
+          nextCounts.by_feed[feedId] = protectedCount
+          nextCounts.total += protectedCount - backendCount
+          remainingProtectedCounts[feedId] = protectedCount
+        }
+      })
+      this.articleCounts = nextCounts
+      this.protectedFeedCounts = remainingProtectedCounts
+    },
+    setFeedArticleCount(feedId: number, count: number, options: { protect?: boolean } = {}) {
+      const previous = this.articleCounts.by_feed[feedId] ?? 0
+      this.articleCounts = {
+        ...this.articleCounts,
+        total: Math.max(0, this.articleCounts.total - previous + count),
+        by_feed: {
+          ...this.articleCounts.by_feed,
+          [feedId]: count
+        }
+      }
+      if (options.protect !== false) {
+        this.protectedFeedCounts = {
+          ...this.protectedFeedCounts,
+          [feedId]: Math.max(this.protectedFeedCounts[feedId] ?? 0, count)
+        }
+      }
+    },
+    async ensureSelectedArticle() {
+      if (!this.articleItems.length) {
+        this.selectedArticle = null
+        return
+      }
+      const selectedId = this.selectedArticle?.id
+      if (!selectedId || !this.articleItems.some((article) => article.id === selectedId)) {
+        await this.selectArticle(this.articleItems[0].id, { markRead: false })
+      }
+    },
+    async selectArticle(id: number, options: { markRead?: boolean } = {}) {
+      const cached = this.detailCache[id]
+      const article = cached ?? await rssApi.article(id)
+      this.detailCache = { ...this.detailCache, [id]: article }
       this.selectedArticle = article
-      if (!article.is_read) {
+      if (options.markRead !== false && !article.is_read) {
         const updated = await rssApi.markRead(article.id, true)
         this.replaceArticle(updated)
+        await this.loadCounts()
       }
     },
-    setArticles(articles: Article[]) {
-      this.articles = sortArticles(
-        articles.map((article) => this.applyArticleOverrides(article)),
-        this.pinnedArticleIds,
-        this.articleSortOrder
-      )
+    mergeArticles(articles: ArticleListItem[]) {
+      const articleMap = new Map(this.articleItems.map((article) => [article.id, article]))
+      articles.forEach((article) => articleMap.set(article.id, article))
+      this.articleItems = sortArticles(Array.from(articleMap.values()), this.pinnedArticleIds, this.articleSortOrder)
       this.articleMutationVersion += 1
-      if (!this.selectedArticle) {
-        this.selectedArticle = this.articles[0] ?? null
-        return
-      }
-      this.selectedArticle = this.articles.find((article) => article.id === this.selectedArticle?.id) ?? this.articles[0] ?? null
     },
-    mergeArticles(articles: Article[]) {
-      const articleMap = new Map(this.articles.map((article) => [article.id, article]))
-      articles.forEach((article) => {
-        articleMap.set(article.id, this.applyArticleOverrides(article))
-      })
-      this.articles = sortArticles(Array.from(articleMap.values()), this.pinnedArticleIds, this.articleSortOrder)
-      this.articleMutationVersion += 1
-      if (!this.selectedArticle) {
-        this.selectedArticle = this.articles[0] ?? null
-        return
+    async refreshFeedArticles(feedId: number, options: { merge?: boolean } = {}) {
+      const page = await rssApi.articles({ feed_id: feedId, limit: ARTICLE_PAGE_SIZE, offset: 0, sort_order: this.articleSortOrder })
+      this.feedArticleCache = {
+        ...this.feedArticleCache,
+        [feedId]: sortArticles(page.items, this.pinnedArticleIds, this.articleSortOrder)
       }
-      this.selectedArticle = this.articles.find((article) => article.id === this.selectedArticle?.id) ?? this.selectedArticle
-    },
-    async refreshFeedArticles(feedId: number) {
-      const articles = await rssApi.articles({ feed_id: feedId })
-      this.mergeArticles(articles)
+      if (options.merge !== false) {
+        this.mergeArticles(page.items)
+      }
+      this.setFeedArticleCount(feedId, page.total)
+      await this.loadCounts()
     },
     upsertFeed(feed: Feed) {
       const index = this.feeds.findIndex((item) => item.id === feed.id)
@@ -179,35 +327,51 @@ export const useReaderStore = defineStore('reader', {
       }
       this.feeds = [feed, ...this.feeds]
     },
+    setFeeds(feeds: Feed[], options: { merge?: boolean } = {}) {
+      if (!options.merge) {
+        this.feeds = feeds
+        return
+      }
+      const feedMap = new Map<number, Feed>()
+      this.feeds.forEach((feed) => feedMap.set(feed.id, feed))
+      feeds.forEach((feed) => feedMap.set(feed.id, feed))
+      this.feeds = Array.from(feedMap.values())
+    },
     removeFeeds(feedIds: number[]) {
       const ids = new Set(feedIds)
       this.feeds = this.feeds.filter((feed) => !ids.has(feed.id))
-      this.articles = this.articles.filter((article) => !ids.has(article.feed_id))
+      this.articleItems = this.articleItems.filter((article) => !ids.has(article.feed_id))
+      this.feedArticleCache = Object.fromEntries(
+        Object.entries(this.feedArticleCache).filter(([feedId]) => !ids.has(Number(feedId)))
+      )
+      this.protectedFeedCounts = Object.fromEntries(
+        Object.entries(this.protectedFeedCounts).filter(([feedId]) => !ids.has(Number(feedId)))
+      )
       this.articleMutationVersion += 1
       if (this.selectedArticle && ids.has(this.selectedArticle.feed_id)) {
-        this.selectedArticle = this.articles[0] ?? null
+        this.selectedArticle = this.articleItems[0] ? this.detailCache[this.articleItems[0].id] ?? null : null
       }
     },
-    async toggleRead(article: Article) {
+    async toggleRead(article: ArticleListItem | Article) {
       const updated = await rssApi.markRead(article.id, !article.is_read)
       this.replaceArticle(updated)
+      await this.loadCounts()
     },
-    async toggleStar(article: Article) {
+    async toggleStar(article: ArticleListItem | Article) {
       const updated = await rssApi.markStarred(article.id, !article.is_starred)
       this.replaceArticle(updated)
+      await this.loadCounts()
     },
     async setArticleTags(articleId: number, tagIds: number[]) {
-      this.articleTagOverrides = { ...this.articleTagOverrides, [articleId]: tagIds }
-      localStorage.setItem(ARTICLE_TAG_OVERRIDES_KEY, JSON.stringify(this.articleTagOverrides))
-      try {
-        await rssApi.setArticleTags(articleId, tagIds)
-      } catch (error) {
-        console.warn('Falling back to local tag assignment only.', error)
-      }
-      const current = this.articles.find((item) => item.id === articleId) ?? this.selectedArticle
-      if (current) {
+      await rssApi.setArticleTags(articleId, tagIds)
+      const current = this.detailCache[articleId] ?? this.selectedArticle
+      if (current?.id === articleId) {
         this.replaceArticle({ ...current, tag_ids: tagIds })
+      } else {
+        const item = this.articleItems.find((article) => article.id === articleId)
+        if (item) this.replaceArticleItem({ ...item, tag_ids: tagIds })
       }
+      await this.loadCounts()
     },
     togglePinned(articleId: number) {
       const set = new Set(this.pinnedArticleIds)
@@ -218,7 +382,7 @@ export const useReaderStore = defineStore('reader', {
       }
       this.pinnedArticleIds = Array.from(set)
       localStorage.setItem(PINNED_ARTICLES_KEY, JSON.stringify(this.pinnedArticleIds))
-      this.articles = sortArticles(this.articles, this.pinnedArticleIds, this.articleSortOrder)
+      this.articleItems = sortArticles(this.articleItems, this.pinnedArticleIds, this.articleSortOrder)
     },
     isPinned(articleId: number) {
       return this.pinnedArticleIds.includes(articleId)
@@ -255,25 +419,26 @@ export const useReaderStore = defineStore('reader', {
     setArticleSortOrder(value: SortOrder) {
       this.articleSortOrder = value
       localStorage.setItem(ARTICLE_SORT_ORDER_KEY, value)
-      this.articles = sortArticles(this.articles, this.pinnedArticleIds, this.articleSortOrder)
+      this.articleItems = sortArticles(this.articleItems, this.pinnedArticleIds, this.articleSortOrder)
     },
     replaceArticle(article: Article) {
-      const normalized = this.applyArticleOverrides(article)
-      this.articles = sortArticles(
-        this.articles.map((item) => (item.id === normalized.id ? normalized : item)),
-        this.pinnedArticleIds,
-        this.articleSortOrder
-      )
+      this.detailCache = { ...this.detailCache, [article.id]: article }
+      this.replaceArticleItem(toListItem(article))
       if (this.selectedArticle?.id === article.id) {
-        this.selectedArticle = normalized
+        this.selectedArticle = article
       }
     },
-    applyArticleOverrides(article: Article) {
-      const overrideTagIds = this.articleTagOverrides[article.id]
-      return {
-        ...article,
-        tag_ids: overrideTagIds ?? article.tag_ids
+    replaceArticleItem(article: ArticleListItem) {
+      const index = this.articleItems.findIndex((item) => item.id === article.id)
+      if (index >= 0) {
+        const next = [...this.articleItems]
+        next.splice(index, 1, article)
+        this.articleItems = sortArticles(next, this.pinnedArticleIds, this.articleSortOrder)
       }
+      this.articleMutationVersion += 1
+    },
+    withSort(query: ArticleListQuery): ArticleListQuery {
+      return { ...query, sort_order: query.sort_order ?? this.articleSortOrder }
     }
   }
 })

@@ -79,5 +79,5 @@ def list_feed_entries(feed_id: int):
         feed_service.get_feed(feed_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return article_service.list_articles(feed_id=feed_id)
+    return article_service.list_full_articles(feed_id=feed_id)
 

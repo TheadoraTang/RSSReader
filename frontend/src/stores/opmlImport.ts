@@ -26,8 +26,21 @@ function countReport(files: number, results: OPMLImportItem[]): OPMLImportReport
   }
 }
 
+function normalizedImportUrl(value?: string | null) {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) return ''
+
+  try {
+    const url = new URL(trimmed)
+    const pathname = url.pathname === '/' ? '' : url.pathname.replace(/\/$/, '')
+    return `${url.protocol}//${url.host.toLowerCase()}${pathname}${url.search}`
+  } catch {
+    return trimmed.replace(/\/$/, '')
+  }
+}
+
 function isSameImportItem(current: OPMLImportItem, incoming: OPMLImportItem) {
-  return current.source_file === incoming.source_file && current.url === incoming.url
+  return current.source_file === incoming.source_file && normalizedImportUrl(current.url) === normalizedImportUrl(incoming.url)
 }
 
 function normalizeImportItem(item: OPMLImportItem): OPMLImportItem {
@@ -63,7 +76,7 @@ export const useOpmlImportStore = defineStore('opmlImport', {
       this.report = countReport(current.files, results)
     },
     finish(report?: OPMLImportReport | null) {
-      if (report) this.report = report
+      if (report) this.report = countReport(report.files, report.results)
       this.importing = false
     },
     upsertImportedFeed(feed: Feed) {

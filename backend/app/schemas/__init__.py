@@ -1,5 +1,7 @@
 from app.schemas.rss import (
     AIResultRead,
+    ArticleCounts,
+    ArticleListItem,
     ArticleRead,
     BatchDigestExportRequest,
     BatchDigestExportResponse,
@@ -19,6 +21,7 @@ from app.schemas.rss import (
     NoteUpdate,
     OPMLImportReport,
     OperationResult,
+    PaginatedArticles,
     SearchResultRead,
     SummaryRequest,
     SyncLogRead,
@@ -29,6 +32,8 @@ from app.schemas.rss import (
 
 __all__ = [
     "AIResultRead",
+    "ArticleCounts",
+    "ArticleListItem",
     "ArticleRead",
     "BatchDigestExportRequest",
     "BatchDigestExportResponse",
@@ -48,6 +53,7 @@ __all__ = [
     "NoteUpdate",
     "OPMLImportReport",
     "OperationResult",
+    "PaginatedArticles",
     "SearchResultRead",
     "SummaryRequest",
     "SyncLogRead",

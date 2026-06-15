@@ -259,3 +259,109 @@ Result: generated a `Ripple.exe` directory package for configuration verificatio
 cd frontend
 .\node_modules\.bin\vue-tsc.cmd --noEmit
 ```
+
+## Follow-up: Reader Large-Library Performance
+
+### Summary
+
+- Reworked the reader page so large feed collections no longer load and render every article when entering the page.
+- `GET /api/articles` now returns a paginated lightweight payload: `items`, `total`, `limit`, `offset`, and `has_more`.
+- Article list items no longer include `raw_html`, `cleaned_html`, or `cleaned_markdown`; full article content remains available from `GET /api/articles/{id}`.
+- Added `GET /api/articles/counts` for sidebar totals: all, unread, starred, per-feed, and per-tag.
+- Added persistent SQLite `tags` and `article_tags` tables plus tag-aware article filtering and counts.
+- The frontend reader store now keeps `articleItems`, `selectedArticle`, `articleCounts`, pagination state, and a small detail cache.
+- The reader page loads the first 50 articles, loads more while scrolling, and reloads only the current filtered page when filters or sort order change.
+- Sidebar counts now read backend aggregates instead of repeatedly filtering the article array.
+- Full article HTML is loaded only when a user selects an article.
+- SQLite connections now close after each context-managed use, which also prevents Windows test database cleanup failures.
+
+### API Notes
+
+- `GET /api/articles`
+  - Query: `feed_id`, `tag_id`, `unread`, `starred`, `limit`, `offset`, `sort_order`.
+  - `limit` defaults to 50 and is capped at 100.
+  - `sort_order` supports `newest` and `oldest`.
+- `GET /api/articles/counts`
+  - Returns `total`, `unread`, `starred`, `by_feed`, and `by_tag`.
+- `GET /api/feeds/{feed_id}/entries` keeps the old full-array behavior for compatibility.
+
+### Verification
+
+```bash
+cd backend
+$env:PYTHONDONTWRITEBYTECODE='1'; ..\.venv1\Scripts\python.exe -m unittest discover -s tests
+```
+
+Result: 33 tests passed.
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk size warnings.
+
+### Follow-up Fix
+
+- OPML import and sync-all flows now refresh `articleCounts` instead of directly calling `readerStore.loadAll()` with the default query.
+- When streamed OPML item events include article payloads, the reader store merges those articles and immediately reloads backend counts so newly imported feeds show correct sidebar totals.
+- Embedded ReaderView handles lightweight feed-manager change events by refreshing counts, keeping feed article badges correct after add, sync, delete, and OPML import operations.
+
+### Follow-up Fix: OPML Counts and Reader Switching Stability
+
+- OPML import result rows now match pending rows with normalized URLs, so backend-normalized URLs replace the correct local row and no longer leave imported feeds stuck in the uploading state.
+- The reader store can patch a single feed's article count immediately after OPML sync or feed refresh, then reconcile with `/api/articles/counts`.
+- Feed-management refreshes update feed counts without merging imported articles into the currently open filtered article list; the current list reloads its own first page after the OPML stream completes.
+- Reader article-list loads now use a request sequence guard so quick switching between feeds/tags ignores stale responses from earlier requests.
+- The reader page no longer applies a grid-wide loading overlay. Loading is shown inside the article list only, avoiding the white screen seen when switching during OPML import.
+
+### Verification
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
+
+### Follow-up Fix: OPML Progressive Feed Visibility
+
+- Protected per-feed article counts learned from OPML stream item events until backend `/api/articles/counts` reports the same or higher value, preventing older aggregate responses from resetting already imported feeds to `0`.
+- Each completed OPML feed now emits a reader refresh after its local feed/count state has been applied, so a feed selected during import can load articles as soon as its own sync finishes.
+- The subscription management table now merges final `GET /api/feeds` results with feeds already inserted from stream events, avoiding the `No Data` table state after a successful OPML import.
+
+### Verification
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
+
+### Follow-up Fix: Stale Counts and Shared Feed Table State
+
+- Added a request sequence guard for `/api/articles/counts`; stale count responses from earlier refreshes are ignored and can no longer reset newer OPML feed counts to `0`.
+- Subscription management now uses `readerStore.feeds` as its table data source instead of a separate component-local feed array.
+- `loadFeeds()` writes through `readerStore.setFeeds()`, with merge mode on OPML import and initial mount so streamed feed rows remain visible even if a fetch returns an older snapshot.
+
+### Verification
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
+
+### Follow-up Fix: Immediate Reading During OPML Import
+
+- Successful OPML stream item payloads now populate a per-feed article cache in the reader store.
+- The cache stores both lightweight article list items and full article details, allowing an already imported feed to be opened and read while the remaining OPML feeds are still syncing.
+- `loadAll({ feed_id })` now uses the cached feed page immediately when available, avoiding a blocked `/api/articles?feed_id=...` request during the long-running OPML import stream.
+- Loading a cached feed increments the reader load request sequence so older in-flight network loads cannot overwrite the cached readable page.
+- OPML item handling updates protected feed counts from the streamed articles without issuing a per-item aggregate counts request.
+
+### Verification
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.

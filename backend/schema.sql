@@ -54,6 +54,23 @@ CREATE TABLE IF NOT EXISTS notes (
     FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL DEFAULT '#409eff',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS article_tags (
+    entry_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (entry_id, tag_id),
+    FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS ai_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entry_id INTEGER NOT NULL,
@@ -84,6 +101,10 @@ CREATE TABLE IF NOT EXISTS llm_providers (
 
 CREATE INDEX IF NOT EXISTS idx_entries_feed_id ON entries(feed_id);
 CREATE INDEX IF NOT EXISTS idx_entries_published_at ON entries(published_at);
+CREATE INDEX IF NOT EXISTS idx_entries_feed_sort ON entries(feed_id, published_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_entries_read_sort ON entries(is_read, published_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_entries_starred_sort ON entries(is_starred, published_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_article_tags_tag_id ON article_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_logs_feed_id ON feed_fetch_logs(feed_id);
 CREATE INDEX IF NOT EXISTS idx_ai_results_task_type ON ai_results(task_type);
 CREATE INDEX IF NOT EXISTS idx_ai_results_provider_model ON ai_results(provider, model);

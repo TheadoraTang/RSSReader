@@ -144,7 +144,7 @@ class MockRepository:
         self.sync_logs.append({"id": self._next_id(self.sync_logs), "feed_id": feed_id, "status": "success", "message": "Mock 同步任务已触发。", "created_at": now()})
         return deepcopy(feed)
 
-    def list_articles(self, feed_id=None, tag_id=None, unread=None, starred=None):
+    def _filtered_articles(self, feed_id=None, tag_id=None, unread=None, starred=None):
         articles = deepcopy(self.articles)
         if feed_id is not None:
             articles = [item for item in articles if item["feed_id"] == feed_id]
@@ -155,6 +155,45 @@ class MockRepository:
         if starred:
             articles = [item for item in articles if item["is_starred"]]
         return articles
+
+    def list_article_items(self, feed_id=None, tag_id=None, unread=None, starred=None, limit=50, offset=0, sort_order="newest"):
+        articles = self._filtered_articles(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+        reverse = sort_order != "oldest"
+        articles.sort(key=lambda item: item.get("published_at") or item.get("created_at"), reverse=reverse)
+        total = len(articles)
+        limit = max(1, min(100, int(limit or 50)))
+        offset = max(0, int(offset or 0))
+        page = articles[offset:offset + limit]
+        items = [
+            {key: value for key, value in article.items() if key not in {"raw_html", "cleaned_html", "cleaned_markdown"}}
+            for article in page
+        ]
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
+
+    def list_articles(self, feed_id=None, tag_id=None, unread=None, starred=None):
+        return self._filtered_articles(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+
+    def article_counts(self):
+        articles = self._filtered_articles()
+        by_feed = {}
+        by_tag = {}
+        for article in articles:
+            by_feed[article["feed_id"]] = by_feed.get(article["feed_id"], 0) + 1
+            for tag_id in article.get("tag_ids", []):
+                by_tag[tag_id] = by_tag.get(tag_id, 0) + 1
+        return {
+            "total": len(articles),
+            "unread": sum(1 for article in articles if not article["is_read"]),
+            "starred": sum(1 for article in articles if article["is_starred"]),
+            "by_feed": by_feed,
+            "by_tag": by_tag,
+        }
 
     def get_article(self, article_id):
         return deepcopy(self._find(self.articles, article_id))

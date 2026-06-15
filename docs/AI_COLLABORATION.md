@@ -407,3 +407,57 @@
 - Refined the article list splitter so the second column can shrink independently into compact and micro layouts without leaving unused blank space.
 - Restyled the article detail toolbar as a smaller right-aligned icon group within the reading width to reduce visual weight.
 - Verification: frontend type check passed.
+
+## 2026-06-15 (Reader large-library performance)
+
+- Used AI Coding Agent to redesign the reader data flow for large feed collections.
+- Changed `GET /api/articles` from a full article array to a paginated lightweight response with `items`, `total`, `limit`, `offset`, and `has_more`.
+- Added `GET /api/articles/counts` for total, unread, starred, feed, and tag counts so the sidebar no longer recalculates counts by scanning loaded articles.
+- Added persistent SQLite `tags` and `article_tags` tables so tag filtering and tag counts can be handled by the backend instead of local-only overrides.
+- Updated the reader store to load the first page only, load additional pages on scroll, cache selected article details, and fetch full article bodies only when selected.
+- Removed the reader list's full-body thumbnail scan; article cards now use lightweight list data.
+- Fixed SQLite connection cleanup so test databases are not left locked on Windows.
+- Verification: backend unittest discovery passed; frontend build passed with existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-15 (OPML import article count refresh)
+
+- Used AI Coding Agent to fix a follow-on regression from the reader pagination/counts refactor.
+- OPML stream item handling now refreshes backend article counts when imported article payloads are merged directly into the reader store.
+- Feed management no longer calls `readerStore.loadAll()` with the default all-articles query after OPML import or sync-all; it refreshes counts and lets the embedded reader reload its current filtered list.
+- ReaderView now refreshes counts even for lightweight feed-manager change events marked `reload: false`, so sidebar article totals stay correct after add, sync, and delete flows.
+- Verification: frontend build passed with the existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-15 (OPML import counts and switching stability)
+
+- Used AI Coding Agent to continue fixing OPML import regressions after the reader pagination/counts refactor.
+- Normalized OPML import result matching by URL so backend-normalized feed URLs can replace local pending rows instead of leaving rows stuck at "uploading".
+- Added immediate per-feed article count updates in the reader store, then kept backend aggregate counts as the final source of truth.
+- Changed feed-management article refreshes to update counts without merging newly imported feed articles into whichever filtered article list is currently open.
+- Added a reader list request guard so rapid feed/tag/filter switching ignores stale responses from earlier loads.
+- Removed the reader grid-wide loading overlay and replaced it with an article-list-local loading indicator to avoid the white-screen effect during switching.
+- Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-15 (OPML import progressive feed visibility)
+
+- Used AI Coding Agent to fix the remaining OPML import race where earlier imported feed counts could drop back to zero while later feeds were still syncing.
+- Reader counts now keep protected per-feed values from streamed OPML item results until backend aggregate counts catch up, preventing stale `/api/articles/counts` responses from overwriting known article totals with zero.
+- Each completed OPML feed now notifies the embedded reader to reload the current filtered article page, so selecting a feed during import can recover as soon as that feed finishes syncing.
+- Feed management now merges the final backend feed list with feeds already inserted from streamed events, so the table below the OPML result does not stay empty or lose imported feeds until manual refresh.
+- Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-15 (OPML import stale counts and feed table source)
+
+- Used AI Coding Agent to correct the unresolved OPML import race where older article-count requests could still overwrite newer imported feed counts.
+- Added a count-request sequence guard in the reader store so only the latest `/api/articles/counts` response can update aggregate/sidebar counts.
+- Changed the subscription management table to read from the shared reader feed store instead of a separate local `feeds` ref, removing the split-brain state where the sidebar had feeds but the management table showed `No Data`.
+- Feed management now writes `GET /api/feeds` results through `readerStore.setFeeds()`, using merge mode during OPML import and initial mount so stream-inserted feeds are not lost to an empty or stale fetch.
+- Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-15 (OPML imported feed immediate reading)
+
+- Used AI Coding Agent to fix the specific OPML import interaction where clicking an already imported feed during the remaining import stream could reset counts and leave the article list stuck loading.
+- Reader store now caches articles carried by each successful OPML stream item by `feed_id`, including full article detail data for immediate reading.
+- Clicking a feed with cached OPML articles now renders from the local cache first instead of waiting for `/api/articles?feed_id=...` while the backend is still busy syncing later feeds.
+- Cached feed loading advances the reader load request sequence, so any older blocked network response cannot overwrite the cached readable list when it eventually returns.
+- OPML item handling no longer calls `/api/articles/counts` after every successful feed; it updates protected per-feed counts from the streamed article payload and leaves aggregate reconciliation to later refreshes.
+- Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.

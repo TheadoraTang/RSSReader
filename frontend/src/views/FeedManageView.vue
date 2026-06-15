@@ -213,7 +213,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const opmlImportStore = useOpmlImportStore()
 const readerStore = useReaderStore()
-const feeds = ref<Feed[]>([])
+const feeds = computed(() => readerStore.feeds)
 const selectedFeeds = ref<Feed[]>([])
 const feedTableRef = ref<FeedTableExpose | null>(null)
 const opmlFileInput = ref<HTMLInputElement | null>(null)
@@ -239,10 +239,13 @@ const isBusy = computed(
     exportingOpml.value
 )
 
-onMounted(loadFeeds)
+onMounted(() => {
+  void loadFeeds({ merge: true })
+})
 
-async function loadFeeds() {
-  feeds.value = await rssApi.feeds()
+async function loadFeeds(options: { merge?: boolean } = {}) {
+  const nextFeeds = await rssApi.feeds()
+  readerStore.setFeeds(nextFeeds, options)
   selectedFeeds.value = selectedFeeds.value.filter((feed) => feeds.value.some((item) => item.id === feed.id))
 }
 
@@ -278,7 +281,7 @@ async function addFeed() {
     await loadFeeds()
     readerStore.upsertFeed(result.feed)
     await refreshFeedArticlesSafely(result.feed.id)
-    emit('changed', { reload: false })
+    emit('changed')
     if (result.status === 'partial') {
       lastSyncReport.value = {
         total: 1,
@@ -387,7 +390,7 @@ async function syncAll() {
     const report = await rssApi.syncAll()
     lastSyncReport.value = report
     await loadFeeds()
-    await readerStore.loadAll()
+    await readerStore.loadCounts()
     emit('changed', { reload: false })
     showSyncReportMessage(report)
   } catch (error) {
@@ -422,15 +425,18 @@ async function handleOpmlFilesSelected(event: Event) {
         opmlImportStore.finish(event.report)
       }
       if (event.item?.feed) {
-        const fallbackRefresh = publishImportedFeed(event.item.feed, event.item.articles ?? [])
-        if (fallbackRefresh) importedFeedRefreshes.push(fallbackRefresh)
+        importedFeedRefreshes.push(
+          publishImportedFeed(event.item.feed, event.item.articles ?? []).then(() => {
+            emit('changed')
+          })
+        )
       }
     })
     const report = opmlImportStore.report
     await Promise.allSettled(importedFeedRefreshes)
-    await loadFeeds()
-    await readerStore.loadAll()
-    emit('changed', { reload: false })
+    await loadFeeds({ merge: true })
+    await readerStore.loadCounts()
+    emit('changed')
     opmlImportStore.finish(report)
     if (report) showImportReportMessage(report)
   } catch (error) {
@@ -598,27 +604,21 @@ function looksLikeUrl(value?: string | null) {
 }
 
 function upsertFeed(feed: Feed) {
-  const index = feeds.value.findIndex((item) => item.id === feed.id)
-  if (index >= 0) {
-    feeds.value.splice(index, 1, feed)
-    return
-  }
-  feeds.value.unshift(feed)
+  readerStore.upsertFeed(feed)
 }
 
-function publishImportedFeed(feed: Feed, articles: Article[]) {
+async function publishImportedFeed(feed: Feed, articles: Article[]) {
   upsertFeed(feed)
-  readerStore.upsertFeed(feed)
   if (articles.length > 0) {
-    readerStore.mergeArticles(articles)
-    return null
+    readerStore.cacheFeedArticles(feed.id, articles)
+    return
   }
-  return refreshFeedArticlesSafely(feed.id)
+  await refreshFeedArticlesSafely(feed.id)
 }
 
 async function refreshFeedArticlesSafely(feedId: number) {
   try {
-    await readerStore.refreshFeedArticles(feedId)
+    await readerStore.refreshFeedArticles(feedId, { merge: false })
   } catch (error) {
     console.warn('Failed to refresh feed articles', error)
   }

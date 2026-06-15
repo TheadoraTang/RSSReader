@@ -89,6 +89,37 @@ class ArticleRead(BaseModel):
     created_at: datetime
 
 
+class ArticleListItem(BaseModel):
+    id: int
+    feed_id: int
+    feed_title: str
+    title: str
+    url: str
+    author: str | None = None
+    published_at: datetime | None = None
+    summary: str | None = None
+    is_read: bool = False
+    is_starred: bool = False
+    tag_ids: list[int] = Field(default_factory=list)
+    created_at: datetime
+
+
+class PaginatedArticles(BaseModel):
+    items: list[ArticleListItem] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
+class ArticleCounts(BaseModel):
+    total: int = 0
+    unread: int = 0
+    starred: int = 0
+    by_feed: dict[int, int] = Field(default_factory=dict)
+    by_tag: dict[int, int] = Field(default_factory=dict)
+
+
 class OPMLImportItem(BaseModel):
     url: str | None = None
     title: str | None = None

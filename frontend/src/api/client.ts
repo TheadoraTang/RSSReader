@@ -54,6 +54,24 @@ export interface Article {
   created_at: string
 }
 
+export type ArticleListItem = Omit<Article, 'raw_html' | 'cleaned_html' | 'cleaned_markdown'>
+
+export interface PaginatedArticles {
+  items: ArticleListItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface ArticleCounts {
+  total: number
+  unread: number
+  starred: number
+  by_feed: Record<number, number>
+  by_tag: Record<number, number>
+}
+
 export interface Tag {
   id: number
   name: string
@@ -306,7 +324,8 @@ export const rssApi = {
       })
       .then((res) => res.data)
   },
-  articles: (params?: Record<string, unknown>) => api.get<Article[]>('/articles', { params }).then((res) => res.data),
+  articles: (params?: Record<string, unknown>) => api.get<PaginatedArticles>('/articles', { params }).then((res) => res.data),
+  articleCounts: () => api.get<ArticleCounts>('/articles/counts').then((res) => res.data),
   article: (id: number) => api.get<Article>(`/articles/${id}`).then((res) => res.data),
   refreshArticleContent: (id: number) => api.post<Article>(`/articles/${id}/refresh-content`).then((res) => res.data),
   markRead: (id: number, is_read: boolean) => api.patch<Article>(`/articles/${id}/read`, null, { params: { is_read } }).then((res) => res.data),

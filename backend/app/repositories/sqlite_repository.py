@@ -15,7 +15,6 @@ def now() -> str:
 class SQLiteRepository:
     def __init__(self) -> None:
         initialize_database()
-        self.tags: list[dict] = []
 
     def list_feeds(self):
         with get_connection() as conn:
@@ -196,25 +195,83 @@ class SQLiteRepository:
             rows = conn.execute(sql, (fts_query, limit)).fetchall()
         return [self._search_result(row) for row in rows]
 
+    def list_article_items(self, feed_id=None, tag_id=None, unread=None, starred=None, limit=50, offset=0, sort_order="newest"):
+        conditions, params = self._article_filter_conditions(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        direction = "ASC" if sort_order == "oldest" else "DESC"
+        limit = max(1, min(100, int(limit or 50)))
+        offset = max(0, int(offset or 0))
+        query = f"""
+            SELECT
+                entries.id, entries.feed_id, feeds.title AS feed_title,
+                entries.title, entries.link, entries.author, entries.published_at,
+                entries.summary, entries.is_read, entries.is_starred, entries.created_at
+            FROM entries
+            JOIN feeds ON feeds.id = entries.feed_id
+            {where}
+            ORDER BY COALESCE(entries.published_at, entries.created_at) {direction}, entries.id {direction}
+            LIMIT ? OFFSET ?
+        """
+        with get_connection() as conn:
+            rows = conn.execute(query, [*params, limit, offset]).fetchall()
+            total = self.count_articles(conn=conn, feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+            tag_map = self._tag_ids_by_entry(conn, [row["id"] for row in rows])
+        return {
+            "items": [self._article_list_item(row, tag_map.get(row["id"], [])) for row in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(rows) < total,
+        }
+
+    def count_articles(self, conn=None, feed_id=None, tag_id=None, unread=None, starred=None):
+        conditions, params = self._article_filter_conditions(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"SELECT COUNT(*) FROM entries {where}"
+        if conn is not None:
+            return int(conn.execute(query, params).fetchone()[0])
+        with get_connection() as local_conn:
+            return int(local_conn.execute(query, params).fetchone()[0])
+
     def list_articles(self, feed_id=None, tag_id=None, unread=None, starred=None):
-        query = """
+        conditions, params = self._article_filter_conditions(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
             SELECT entries.*, feeds.title AS feed_title
             FROM entries
             JOIN feeds ON feeds.id = entries.feed_id
-            WHERE 1 = 1
+            {where}
+            ORDER BY COALESCE(entries.published_at, entries.created_at) DESC
         """
-        params = []
-        if feed_id is not None:
-            query += " AND entries.feed_id = ?"
-            params.append(feed_id)
-        if unread is True:
-            query += " AND entries.is_read = 0"
-        if starred is True:
-            query += " AND entries.is_starred = 1"
-        query += " ORDER BY COALESCE(entries.published_at, entries.created_at) DESC"
         with get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [self._article(row) for row in rows]
+            tag_map = self._tag_ids_by_entry(conn, [row["id"] for row in rows])
+        return [self._article(row, tag_map.get(row["id"], [])) for row in rows]
+
+    def article_counts(self):
+        with get_connection() as conn:
+            totals = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
+                    COALESCE(SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END), 0) AS starred
+                FROM entries
+                """
+            ).fetchone()
+            by_feed = conn.execute(
+                "SELECT feed_id, COUNT(*) AS count FROM entries GROUP BY feed_id"
+            ).fetchall()
+            by_tag = conn.execute(
+                "SELECT tag_id, COUNT(*) AS count FROM article_tags GROUP BY tag_id"
+            ).fetchall()
+        return {
+            "total": int(totals["total"]),
+            "unread": int(totals["unread"]),
+            "starred": int(totals["starred"]),
+            "by_feed": {int(row["feed_id"]): int(row["count"]) for row in by_feed},
+            "by_tag": {int(row["tag_id"]): int(row["count"]) for row in by_tag},
+        }
 
     def get_article(self, article_id):
         with get_connection() as conn:
@@ -229,7 +286,9 @@ class SQLiteRepository:
             ).fetchone()
         if row is None:
             raise ValueError(f"Article {article_id} not found")
-        return self._article(row)
+        with get_connection() as conn:
+            tag_map = self._tag_ids_by_entry(conn, [article_id])
+        return self._article(row, tag_map.get(article_id, []))
 
     def refresh_article_content(self, article_id: int):
         article = self.get_article(article_id)
@@ -618,26 +677,56 @@ class SQLiteRepository:
         return self._fill_buckets(range, [dict(r) for r in rows])
 
     def list_tags(self):
-        return self.tags
+        with get_connection() as conn:
+            rows = conn.execute("SELECT * FROM tags ORDER BY name ASC, id ASC").fetchall()
+        return [self._tag(row) for row in rows]
 
     def create_tag(self, payload):
-        tag = {"id": len(self.tags) + 1, **payload.model_dump()}
-        self.tags.append(tag)
-        return tag
+        timestamp = now()
+        with get_connection() as conn:
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO tags (name, color, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (payload.name, payload.color, timestamp, timestamp),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("Tag already exists") from exc
+            row = conn.execute("SELECT * FROM tags WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return self._tag(row)
 
     def update_tag(self, tag_id, payload):
-        for tag in self.tags:
-            if tag["id"] == tag_id:
-                tag.update({key: value for key, value in payload.model_dump(exclude_unset=True).items() if value is not None})
-                return tag
-        raise ValueError(f"Tag {tag_id} not found")
+        self._tag_row(tag_id)
+        data = payload.model_dump(exclude_unset=True)
+        updates = {key: value for key, value in data.items() if value is not None and key in {"name", "color"}}
+        if updates:
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            values = [*updates.values(), now(), tag_id]
+            with get_connection() as conn:
+                conn.execute(f"UPDATE tags SET {assignments}, updated_at = ? WHERE id = ?", values)
+        return self._tag(self._tag_row(tag_id))
 
     def delete_tag(self, tag_id):
-        self.tags = [tag for tag in self.tags if tag["id"] != tag_id]
+        self._tag_row(tag_id)
+        with get_connection() as conn:
+            conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
 
     def set_article_tags(self, article_id, tag_ids):
         self.get_article(article_id)
-        return {"article_id": article_id, "tag_ids": tag_ids}
+        unique_tag_ids = sorted({int(tag_id) for tag_id in tag_ids})
+        with get_connection() as conn:
+            if unique_tag_ids:
+                placeholders = ",".join("?" for _ in unique_tag_ids)
+                rows = conn.execute(f"SELECT id FROM tags WHERE id IN ({placeholders})", unique_tag_ids).fetchall()
+                existing = {row["id"] for row in rows}
+                missing = [tag_id for tag_id in unique_tag_ids if tag_id not in existing]
+                if missing:
+                    raise ValueError(f"Tag {missing[0]} not found")
+            conn.execute("DELETE FROM article_tags WHERE entry_id = ?", (article_id,))
+            conn.executemany(
+                "INSERT INTO article_tags (entry_id, tag_id, created_at) VALUES (?, ?, ?)",
+                [(article_id, tag_id, now()) for tag_id in unique_tag_ids],
+            )
+        return {"article_id": article_id, "tag_ids": unique_tag_ids}
 
     def _save_entries_for_feed(self, feed_id: int, entries: list[dict]) -> int:
         with get_connection() as conn:
@@ -786,6 +875,46 @@ class SQLiteRepository:
             raise ValueError(f"Feed {feed_id} not found")
         return row
 
+    def _tag_row(self, tag_id: int):
+        with get_connection() as conn:
+            row = conn.execute("SELECT * FROM tags WHERE id = ?", (tag_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Tag {tag_id} not found")
+        return row
+
+    def _article_filter_conditions(self, feed_id=None, tag_id=None, unread=None, starred=None):
+        conditions = []
+        params = []
+        if feed_id is not None:
+            conditions.append("entries.feed_id = ?")
+            params.append(feed_id)
+        if tag_id is not None:
+            conditions.append("EXISTS (SELECT 1 FROM article_tags WHERE article_tags.entry_id = entries.id AND article_tags.tag_id = ?)")
+            params.append(tag_id)
+        if unread is True:
+            conditions.append("entries.is_read = 0")
+        if starred is True:
+            conditions.append("entries.is_starred = 1")
+        return conditions, params
+
+    def _tag_ids_by_entry(self, conn: sqlite3.Connection, entry_ids: list[int]) -> dict[int, list[int]]:
+        if not entry_ids:
+            return {}
+        placeholders = ",".join("?" for _ in entry_ids)
+        rows = conn.execute(
+            f"""
+            SELECT entry_id, tag_id
+            FROM article_tags
+            WHERE entry_id IN ({placeholders})
+            ORDER BY tag_id ASC
+            """,
+            entry_ids,
+        ).fetchall()
+        tag_map: dict[int, list[int]] = {entry_id: [] for entry_id in entry_ids}
+        for row in rows:
+            tag_map.setdefault(row["entry_id"], []).append(row["tag_id"])
+        return tag_map
+
     def _feed_exists_by_url(self, url: str) -> bool:
         with get_connection() as conn:
             row = conn.execute("SELECT id FROM feeds WHERE url = ?", (url,)).fetchone()
@@ -814,7 +943,30 @@ class SQLiteRepository:
             "created_at": row["created_at"],
         }
 
-    def _article(self, row):
+    def _tag(self, row):
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "color": row["color"],
+        }
+
+    def _article_list_item(self, row, tag_ids=None):
+        return {
+            "id": row["id"],
+            "feed_id": row["feed_id"],
+            "feed_title": row["feed_title"],
+            "title": row["title"],
+            "url": row["link"] or "",
+            "author": row["author"],
+            "published_at": row["published_at"],
+            "summary": row["summary"],
+            "is_read": bool(row["is_read"]),
+            "is_starred": bool(row["is_starred"]),
+            "tag_ids": tag_ids or [],
+            "created_at": row["created_at"],
+        }
+
+    def _article(self, row, tag_ids=None):
         return {
             "id": row["id"],
             "feed_id": row["feed_id"],
@@ -829,7 +981,7 @@ class SQLiteRepository:
             "cleaned_markdown": row["cleaned_markdown"],
             "is_read": bool(row["is_read"]),
             "is_starred": bool(row["is_starred"]),
-            "tag_ids": [],
+            "tag_ids": tag_ids or [],
             "created_at": row["created_at"],
         }
 
