@@ -316,9 +316,17 @@
               <el-button class="toolbar-icon-button" :icon="CollectionTag" circle aria-label="标签" title="标签" />
             </template>
             <div class="tag-popover-body">
-              <div class="tag-selection-list">
+              <el-input
+                v-model="tagSearchQuery"
+                class="tag-search-input"
+                size="small"
+                clearable
+                placeholder="搜索标签"
+                @keyup.enter="createAndAssignTagFromSearch"
+              />
+              <div v-if="filteredTagOptions.length" class="tag-selection-list">
                 <button
-                  v-for="tag in store.tags"
+                  v-for="tag in filteredTagOptions"
                   :key="tag.id"
                   type="button"
                   class="tag-selection-item"
@@ -346,6 +354,7 @@
                   </span>
                 </button>
               </div>
+              <div v-else class="tag-selection-empty">没有匹配标签</div>
               <div class="tag-creator-card">
                 <div class="tag-create-row">
                   <el-input
@@ -740,6 +749,7 @@ const selectedBatchArticleIds = ref<number[]>([])
 const batchIncludeFullText = ref(false)
 const newTagName = ref('')
 const newTagColor = ref('#5b8def')
+const tagSearchQuery = ref('')
 const failedThumbnailKeys = ref<Set<string>>(new Set())
 const failedFeedIconIds = ref<Set<number>>(new Set())
 const syncingAllFeeds = ref(false)
@@ -773,6 +783,11 @@ const renderedArticleHtml = computed(() => {
 })
 
 const selectedArticleTagIds = computed(() => store.selectedArticle?.tag_ids ?? [])
+const filteredTagOptions = computed(() => {
+  const keyword = tagSearchQuery.value.trim().toLowerCase()
+  if (!keyword) return store.tags
+  return store.tags.filter((tag) => tag.name.toLowerCase().includes(keyword))
+})
 const quickFilters = computed(() => [
   { key: 'all' as const, label: '全部文章', count: store.articleCounts.total },
   { key: 'unread' as const, label: '未读文章', count: store.articleCounts.unread },
@@ -1273,8 +1288,9 @@ async function createTag() {
   const name = newTagName.value.trim()
   if (!name) return
   try {
-    await store.createTag({ name, color: newTagColor.value })
+    const tag = await store.createTag({ name, color: newTagColor.value })
     newTagName.value = ''
+    return tag
   } catch (error) {
     ElMessage.error(getErrorMessage(error, '创建标签失败'))
   }
@@ -1297,6 +1313,17 @@ async function toggleSelectedArticleTag(tagId: number) {
     current.add(tagId)
   }
   await updateSelectedArticleTags(Array.from(current))
+}
+
+async function createAndAssignTagFromSearch() {
+  const name = tagSearchQuery.value.trim()
+  if (!name || !store.selectedArticle) return
+  const matchedTag = store.tags.find((tag) => tag.name.trim().toLowerCase() === name.toLowerCase())
+  const tag = matchedTag ?? await store.createTag({ name, color: newTagColor.value })
+  if (!selectedArticleTagIds.value.includes(tag.id)) {
+    await updateSelectedArticleTags([...selectedArticleTagIds.value, tag.id])
+  }
+  tagSearchQuery.value = ''
 }
 
 async function deleteTag(tagId: number) {
@@ -3013,23 +3040,31 @@ async function exportNote() {
   gap: 10px;
 }
 
+.tag-search-input {
+  width: 100%;
+}
+
 .tag-selection-list {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
   max-height: 220px;
   overflow: auto;
+  padding: 2px 2px 4px;
 }
 
 .tag-selection-item {
-  width: 100%;
+  max-width: 100%;
   border: 0;
-  border-radius: 14px;
-  padding: 14px 16px;
+  border-radius: 999px;
+  padding: 7px 8px 7px 10px;
   background: color-mix(in srgb, var(--app-surface-strong) 90%, var(--app-bg) 10%);
   color: inherit;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 7px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -3041,15 +3076,37 @@ async function exportNote() {
 .tag-selection-main {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   min-width: 0;
   font-weight: 700;
+  font-size: 13px;
 }
 
 .tag-selection-main span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tag-selection-actions {
+  gap: 4px;
+}
+
+.tag-selection-actions .tag-delete-action {
+  width: 20px;
+  height: 20px;
+}
+
+.tag-selection-empty {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--app-surface-strong) 78%, var(--app-bg) 22%);
+  color: color-mix(in srgb, currentColor 48%, transparent 52%);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .tag-creator-card {

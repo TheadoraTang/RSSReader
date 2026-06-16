@@ -322,6 +322,21 @@ npm.cmd run build --prefix frontend
 
 Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
 
+### Follow-up Fix: Reader Tag Popover Layout and Search
+
+- The article tag popover now renders tags as compact chips instead of full-width rows.
+- Tag chips wrap automatically when the row is full, making large tag sets easier to scan and assign.
+- Added a search input to filter existing tags in the article tag popover.
+- Pressing Enter in the search box assigns an exact matching tag, or creates and assigns a new tag with the current tag color if no exact match exists.
+
+### Verification
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
+
 ### Follow-up Fix: Tag Actions During OPML Import
 
 - Added a frontend `deleteTag` API wrapper for the existing backend `DELETE /api/tags/{tag_id}` endpoint.

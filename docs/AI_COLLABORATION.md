@@ -480,3 +480,11 @@
 - Locally created tags receive temporary negative ids when the backend is busy, and tag counts update from the known cached/list/detail articles.
 - The reader sidebar and article tag popover now include delete controls; deleting a tag removes it from visible article lists, cached OPML articles, detail cache, selected article state, and tag counts.
 - Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-16 (Reader tag popover layout and search)
+
+- Used AI Coding Agent to improve the reader article tag popover after the tag action fixes.
+- Changed the tag picker from one-tag-per-row cards to compact tag chips that wrap onto additional rows when space runs out.
+- Added a tag search input in the article tag popover so users can quickly filter existing tags before assigning them.
+- Pressing Enter in the tag search box now assigns an exact matching tag or creates and assigns a new tag using the current tag color.
+- Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.
