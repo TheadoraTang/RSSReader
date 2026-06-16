@@ -7,10 +7,32 @@
     <section class="panel">
       <h2 class="section-title">AI Provider</h2>
       <el-alert
-        title="文章摘要、AI 标签和 RAG Chat 共用这里启用的默认 Provider；API Key 会加密保存，编辑时留空则保留原 Key。"
+        title="文章摘要、AI 标签和 RAG Chat 共用当前选用的 Provider；API Key 会加密保存，编辑时留空则保留原 Key。"
         type="info"
         :closable="false"
       />
+      <div class="active-provider-bar">
+        <div class="active-provider-copy">
+          <span class="active-provider-label">当前使用</span>
+          <strong>{{ defaultProvider?.name || '未选择 Provider' }}</strong>
+          <span>{{ defaultProvider?.model || '请先新增并启用一个 Provider' }}</span>
+        </div>
+        <el-select
+          v-model="selectedProviderId"
+          placeholder="选择 AI Provider"
+          class="active-provider-select"
+          :disabled="!providers.length || switchingProvider"
+          @change="selectActiveProvider"
+        >
+          <el-option
+            v-for="item in providers"
+            :key="item.id"
+            :label="providerOptionLabel(item)"
+            :value="item.id"
+            :disabled="!item.enabled"
+          />
+        </el-select>
+      </div>
       <el-form label-width="120px" class="settings-form">
         <el-form-item label="快速模板">
           <el-segmented v-model="providerTemplate" :options="providerTemplates" @change="applyProviderTemplate" />
@@ -67,6 +89,7 @@
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="editProvider(row)">编辑</el-button>
+            <el-button link type="success" :disabled="row.is_default || !row.enabled" @click="setDefaultProvider(row)">选用</el-button>
             <el-button link type="danger" @click="removeProvider(row.id)">删除</el-button>
           </template>
         </el-table-column>
@@ -134,9 +157,11 @@ const providerTemplates = ['vLLM Qwen3-8B', 'Ollama', 'OpenAI Compatible']
 const providerTemplate = ref('vLLM Qwen3-8B')
 
 const providers = ref<LLMProvider[]>([])
+const selectedProviderId = ref<number | null>(null)
 const editingProviderId = ref<number | null>(null)
 const editingProviderHasApiKey = ref(false)
 const savingProvider = ref(false)
+const switchingProvider = ref(false)
 const defaultProvider = computed(() => providers.value.find((item) => item.enabled && item.is_default) || providers.value.find((item) => item.enabled))
 
 const provider = reactive({
@@ -174,8 +199,37 @@ onMounted(async () => {
 async function loadProviders() {
   providers.value = await rssApi.llmProviders()
   const current = defaultProvider.value
+  selectedProviderId.value = current?.id ?? null
   rag.chat_provider_name = current?.name || rag.chat_provider_name
   rag.chat_provider_model = current?.model || rag.chat_provider_model
+}
+
+function providerOptionLabel(item: LLMProvider) {
+  const state = item.enabled ? (item.is_default ? '当前' : '可用') : '停用'
+  return `${item.name} · ${item.model} · ${state}`
+}
+
+async function selectActiveProvider(value: number | string | boolean | undefined) {
+  const providerId = Number(value)
+  const item = providers.value.find((candidate) => candidate.id === providerId)
+  if (!item || item.is_default) return
+  await setDefaultProvider(item)
+}
+
+async function setDefaultProvider(row: LLMProvider) {
+  switchingProvider.value = true
+  try {
+    await rssApi.updateLLMProvider(row.id, { is_default: true, enabled: true })
+    await loadProviders()
+    const cfg = await rssApi.getRagConfig()
+    Object.assign(rag, cfg)
+    ElMessage.success(`已选用 ${row.name}`)
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e))
+    selectedProviderId.value = defaultProvider.value?.id ?? null
+  } finally {
+    switchingProvider.value = false
+  }
 }
 
 function applyProviderTemplate() {
@@ -297,6 +351,41 @@ async function saveRag() {
 .settings-form {
   width: 100%;
   margin-top: 16px;
+}
+
+.active-provider-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  background: var(--el-fill-color-lighter);
+}
+
+.active-provider-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--el-text-color-secondary);
+}
+
+.active-provider-copy strong {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+
+.active-provider-label {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+
+.active-provider-select {
+  width: min(360px, 44vw);
+  flex: 0 0 auto;
 }
 
 .section-title {
