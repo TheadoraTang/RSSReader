@@ -47,7 +47,21 @@
               <span class="tag-dot" :style="{ background: tag.color }"></span>
               <span>{{ tag.name }}</span>
             </span>
-            <span class="sidebar-filter-count">{{ tagArticleCount(tag.id) }}</span>
+            <span class="tag-filter-actions">
+              <span class="sidebar-filter-count">{{ tagArticleCount(tag.id) }}</span>
+              <span
+                role="button"
+                tabindex="0"
+                class="tag-delete-action"
+                :aria-label="`删除标签 ${tag.name}`"
+                title="删除标签"
+                @click.stop="deleteTag(tag.id)"
+                @keydown.enter.stop.prevent="deleteTag(tag.id)"
+                @keydown.space.stop.prevent="deleteTag(tag.id)"
+              >
+                <el-icon><Delete /></el-icon>
+              </span>
+            </span>
           </button>
         </div>
 
@@ -315,7 +329,21 @@
                     <span class="tag-dot" :style="{ background: tag.color }"></span>
                     <span>{{ tag.name }}</span>
                   </span>
-                  <el-icon v-if="selectedArticleTagIds.includes(tag.id)"><Check /></el-icon>
+                  <span class="tag-selection-actions">
+                    <el-icon v-if="selectedArticleTagIds.includes(tag.id)"><Check /></el-icon>
+                    <span
+                      role="button"
+                      tabindex="0"
+                      class="tag-delete-action"
+                      :aria-label="`删除标签 ${tag.name}`"
+                      title="删除标签"
+                      @click.stop="deleteTag(tag.id)"
+                      @keydown.enter.stop.prevent="deleteTag(tag.id)"
+                      @keydown.space.stop.prevent="deleteTag(tag.id)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </span>
+                  </span>
                 </button>
               </div>
               <div class="tag-creator-card">
@@ -572,7 +600,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check, Close, CollectionTag, CopyDocument, Download, EditPen, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
+import { Check, Close, CollectionTag, CopyDocument, Delete, Download, EditPen, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -1244,9 +1272,12 @@ function readerPublishedAt(article: Article) {
 async function createTag() {
   const name = newTagName.value.trim()
   if (!name) return
-  const created = await rssApi.createTag({ name, color: newTagColor.value })
-  store.tags = [...store.tags, created]
-  newTagName.value = ''
+  try {
+    await store.createTag({ name, color: newTagColor.value })
+    newTagName.value = ''
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '创建标签失败'))
+  }
 }
 
 async function updateSelectedArticleTags(tagIds: number[]) {
@@ -1266,6 +1297,17 @@ async function toggleSelectedArticleTag(tagId: number) {
     current.add(tagId)
   }
   await updateSelectedArticleTags(Array.from(current))
+}
+
+async function deleteTag(tagId: number) {
+  const deletingActiveTag = activeTagId.value === tagId
+  await store.deleteTag(tagId)
+  if (deletingActiveTag) {
+    activeTagId.value = null
+    await reloadArticleList()
+  } else if (activeTagId.value !== null) {
+    await reloadArticleList()
+  }
 }
 
 function clearNoteSaveTimer() {
@@ -2148,12 +2190,47 @@ async function exportNote() {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.tag-filter-label span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.tag-filter-actions,
+.tag-selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.tag-delete-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, currentColor 42%, transparent 58%);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.tag-delete-action:hover,
+.tag-delete-action:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--el-color-danger) 12%, var(--app-surface) 88%);
+  color: color-mix(in srgb, var(--el-color-danger) 86%, currentColor 14%);
 }
 
 .sidebar-feed-button {
@@ -2965,7 +3042,14 @@ async function exportNote() {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   font-weight: 700;
+}
+
+.tag-selection-main span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag-creator-card {

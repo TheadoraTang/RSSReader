@@ -96,6 +96,10 @@ function sortArticles(articles: ArticleListItem[], pinnedArticleIds: number[], s
   })
 }
 
+function normalizeTagIds(tagIds: number[]) {
+  return Array.from(new Set(tagIds.filter((tagId) => Number.isFinite(tagId)))).sort((left, right) => left - right)
+}
+
 export const useReaderStore = defineStore('reader', {
   state: () => ({
     feeds: [] as Feed[],
@@ -133,6 +137,7 @@ export const useReaderStore = defineStore('reader', {
   actions: {
     async loadAll(query: ArticleListQuery = {}) {
       if (query.feed_id !== undefined && this.loadCachedFeedArticles(query.feed_id)) return
+      if (query.tag_id !== undefined && query.tag_id < 0 && this.loadCachedTagArticles(query.tag_id)) return
 
       const requestId = this.loadRequestId + 1
       const countsRequestId = this.countsRequestId + 1
@@ -242,6 +247,30 @@ export const useReaderStore = defineStore('reader', {
       void this.ensureSelectedArticle()
       return true
     },
+    loadCachedTagArticles(tagId: number) {
+      const cachedArticles = this.knownArticleItems().filter((article) => article.tag_ids.includes(tagId))
+      if (!cachedArticles.length && (this.articleCounts.by_tag[tagId] ?? 0) === 0) return false
+
+      this.loadRequestId += 1
+      this.loading = false
+      this.articleItems = sortArticles(cachedArticles, this.pinnedArticleIds, this.articleSortOrder)
+      this.pagination = {
+        limit: ARTICLE_PAGE_SIZE,
+        offset: this.articleItems.length,
+        total: cachedArticles.length,
+        hasMore: false
+      }
+      this.articleCounts = {
+        ...this.articleCounts,
+        by_tag: {
+          ...this.articleCounts.by_tag,
+          [tagId]: cachedArticles.length
+        }
+      }
+      this.articleMutationVersion += 1
+      void this.ensureSelectedArticle()
+      return true
+    },
     cacheFeedArticles(feedId: number, articles: Article[]) {
       const articleItems = articles.map(toListItem)
       this.feedArticleCache = {
@@ -325,6 +354,136 @@ export const useReaderStore = defineStore('reader', {
       const cachedDetail = this.detailCache[article.id]
       if (cachedDetail) {
         this.detailCache = { ...this.detailCache, [article.id]: { ...cachedDetail, ...article } }
+      }
+    },
+    knownArticleItems() {
+      const articleMap = new Map<number, ArticleListItem>()
+      Object.values(this.feedArticleCache).forEach((items) => {
+        items.forEach((article) => articleMap.set(article.id, article))
+      })
+      this.articleItems.forEach((article) => articleMap.set(article.id, article))
+      Object.values(this.detailCache).forEach((article) => articleMap.set(article.id, toListItem(article)))
+      return Array.from(articleMap.values())
+    },
+    articleTagIds(articleId: number) {
+      const detail = this.detailCache[articleId]
+      if (detail) return detail.tag_ids
+      if (this.selectedArticle?.id === articleId) return this.selectedArticle.tag_ids
+      const listItem = this.articleItems.find((article) => article.id === articleId)
+      if (listItem) return listItem.tag_ids
+      for (const articles of Object.values(this.feedArticleCache)) {
+        const cached = articles.find((article) => article.id === articleId)
+        if (cached) return cached.tag_ids
+      }
+      return []
+    },
+    updateTagCountsForArticle(oldTagIds: number[], newTagIds: number[]) {
+      const oldSet = new Set(oldTagIds)
+      const newSet = new Set(newTagIds)
+      const nextByTag = { ...this.articleCounts.by_tag }
+      oldSet.forEach((tagId) => {
+        if (!newSet.has(tagId)) {
+          nextByTag[tagId] = Math.max(0, (nextByTag[tagId] ?? 0) - 1)
+        }
+      })
+      newSet.forEach((tagId) => {
+        if (!oldSet.has(tagId)) {
+          nextByTag[tagId] = (nextByTag[tagId] ?? 0) + 1
+        }
+      })
+      this.articleCounts = { ...this.articleCounts, by_tag: nextByTag }
+    },
+    applyArticleTagIds(articleId: number, tagIds: number[]) {
+      const normalizedTagIds = normalizeTagIds(tagIds)
+      const oldTagIds = this.articleTagIds(articleId)
+      const item = this.articleItems.find((article) => article.id === articleId)
+      if (item) this.replaceArticleItem({ ...item, tag_ids: normalizedTagIds })
+
+      const nextCache: Record<number, ArticleListItem[]> = {}
+      Object.entries(this.feedArticleCache).forEach(([feedId, articles]) => {
+        nextCache[Number(feedId)] = articles.map((article) =>
+          article.id === articleId ? { ...article, tag_ids: normalizedTagIds } : article
+        )
+      })
+      this.feedArticleCache = nextCache
+
+      const detail = this.detailCache[articleId]
+      if (detail) {
+        this.detailCache = { ...this.detailCache, [articleId]: { ...detail, tag_ids: normalizedTagIds } }
+      }
+      if (this.selectedArticle?.id === articleId) {
+        this.selectedArticle = { ...this.selectedArticle, tag_ids: normalizedTagIds }
+      }
+      this.updateTagCountsForArticle(oldTagIds, normalizedTagIds)
+      this.articleMutationVersion += 1
+    },
+    nextLocalTagId() {
+      return Math.min(0, ...this.tags.map((tag) => tag.id)) - 1
+    },
+    upsertTag(tag: Tag) {
+      const index = this.tags.findIndex((item) => item.id === tag.id)
+      if (index >= 0) {
+        const next = [...this.tags]
+        next.splice(index, 1, tag)
+        this.tags = next
+        return
+      }
+      this.tags = [...this.tags, tag]
+    },
+    async createTag(payload: { name: string; color: string }) {
+      const name = payload.name.trim()
+      if (!name) throw new Error('Tag name is required')
+      const existing = this.tags.find((tag) => tag.name.trim().toLowerCase() === name.toLowerCase())
+      if (existing) return existing
+      try {
+        const created = await rssApi.createTag({ name, color: payload.color })
+        this.upsertTag(created)
+        return created
+      } catch (error) {
+        console.warn('Failed to create tag on backend, using local tag while import is busy', error)
+        const localTag = { id: this.nextLocalTagId(), name, color: payload.color }
+        this.upsertTag(localTag)
+        return localTag
+      }
+    },
+    removeTagFromLocalState(tagId: number) {
+      this.tags = this.tags.filter((tag) => tag.id !== tagId)
+      this.articleItems = this.articleItems.map((article) => ({
+        ...article,
+        tag_ids: article.tag_ids.filter((id) => id !== tagId)
+      }))
+      const nextCache: Record<number, ArticleListItem[]> = {}
+      Object.entries(this.feedArticleCache).forEach(([feedId, articles]) => {
+        nextCache[Number(feedId)] = articles.map((article) => ({
+          ...article,
+          tag_ids: article.tag_ids.filter((id) => id !== tagId)
+        }))
+      })
+      this.feedArticleCache = nextCache
+      this.detailCache = Object.fromEntries(
+        Object.entries(this.detailCache).map(([articleId, article]) => [
+          articleId,
+          { ...article, tag_ids: article.tag_ids.filter((id) => id !== tagId) }
+        ])
+      )
+      if (this.selectedArticle) {
+        this.selectedArticle = {
+          ...this.selectedArticle,
+          tag_ids: this.selectedArticle.tag_ids.filter((id) => id !== tagId)
+        }
+      }
+      const nextByTag = { ...this.articleCounts.by_tag }
+      delete nextByTag[tagId]
+      this.articleCounts = { ...this.articleCounts, by_tag: nextByTag }
+      this.articleMutationVersion += 1
+    },
+    async deleteTag(tagId: number) {
+      this.removeTagFromLocalState(tagId)
+      if (tagId < 0) return
+      try {
+        await rssApi.deleteTag(tagId)
+      } catch (error) {
+        console.warn('Failed to delete tag on backend while import is busy', error)
       }
     },
     adjustUnreadCount(delta: number) {
@@ -445,15 +604,20 @@ export const useReaderStore = defineStore('reader', {
       await this.loadCounts()
     },
     async setArticleTags(articleId: number, tagIds: number[]) {
-      await rssApi.setArticleTags(articleId, tagIds)
-      const current = this.detailCache[articleId] ?? this.selectedArticle
-      if (current?.id === articleId) {
-        this.replaceArticle({ ...current, tag_ids: tagIds })
-      } else {
-        const item = this.articleItems.find((article) => article.id === articleId)
-        if (item) this.replaceArticleItem({ ...item, tag_ids: tagIds })
+      const normalizedTagIds = normalizeTagIds(tagIds)
+      const hasLocalTag = normalizedTagIds.some((tagId) => tagId < 0)
+      if (this.isCachedArticle(articleId) || hasLocalTag) {
+        this.applyArticleTagIds(articleId, normalizedTagIds)
+        return
       }
-      await this.loadCounts()
+      try {
+        await rssApi.setArticleTags(articleId, normalizedTagIds)
+        this.applyArticleTagIds(articleId, normalizedTagIds)
+        await this.loadCounts()
+      } catch (error) {
+        console.warn('Failed to save article tags on backend, applying local tags while import is busy', error)
+        this.applyArticleTagIds(articleId, normalizedTagIds)
+      }
     },
     togglePinned(articleId: number) {
       const set = new Set(this.pinnedArticleIds)

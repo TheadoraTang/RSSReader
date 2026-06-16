@@ -332,6 +332,7 @@ export const rssApi = {
   markStarred: (id: number, is_starred: boolean) => api.patch<Article>(`/articles/${id}/star`, null, { params: { is_starred } }).then((res) => res.data),
   tags: () => api.get<Tag[]>('/tags').then((res) => res.data),
   createTag: (payload: { name: string; color: string }) => api.post<Tag>('/tags', payload).then((res) => res.data),
+  deleteTag: (id: number) => api.delete<OperationResult>(`/tags/${id}`).then((res) => res.data),
   setArticleTags: (articleId: number, tagIds: number[]) =>
     api.post<{ article_id: number; tag_ids: number[] }>(`/articles/${articleId}/tags`, tagIds).then((res) => res.data),
   note: (articleId: number) => api.get<Note>(`/articles/${articleId}/note`).then((res) => res.data),

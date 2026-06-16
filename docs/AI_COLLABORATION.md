@@ -471,3 +471,12 @@
 - Note loading now fails quietly during transient backend unavailability, and unchanged notes are no longer saved during article switches or feed deletion.
 - Deleting a feed now removes its detail cache entries, so a failed save for a removed article does not show the "save previous note failed" message.
 - Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.
+
+## 2026-06-16 (Tag actions during OPML import)
+
+- Used AI Coding Agent to fix tag creation, article tagging, and tag deletion while OPML import is still processing.
+- Added a frontend tag-delete API wrapper and routed tag creation/deletion through the reader store.
+- Cached OPML articles can now receive tag changes locally without waiting for backend article-tag writes, so imported articles remain usable during long uploads.
+- Locally created tags receive temporary negative ids when the backend is busy, and tag counts update from the known cached/list/detail articles.
+- The reader sidebar and article tag popover now include delete controls; deleting a tag removes it from visible article lists, cached OPML articles, detail cache, selected article state, and tag counts.
+- Verification: `npm.cmd run build --prefix frontend` passed with the existing Rollup annotation and chunk-size warnings.

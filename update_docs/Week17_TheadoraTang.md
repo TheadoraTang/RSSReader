@@ -322,6 +322,22 @@ npm.cmd run build --prefix frontend
 
 Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
 
+### Follow-up Fix: Tag Actions During OPML Import
+
+- Added a frontend `deleteTag` API wrapper for the existing backend `DELETE /api/tags/{tag_id}` endpoint.
+- Reader tag operations now support cached OPML articles: article tag assignments update the visible list item, selected detail, detail cache, per-feed article cache, and tag counts locally when the backend is still busy.
+- Tag creation falls back to temporary local tags with negative ids if the backend cannot respond during a long OPML stream, allowing users to organize already imported articles immediately.
+- Tag deletion is available from both the sidebar tag list and the article tag popover, and removes the deleted tag from all known local article states.
+- Local tag filters can render from cached/list/detail articles, so temporary tags remain usable before backend reconciliation.
+
+### Verification
+
+```bash
+npm.cmd run build --prefix frontend
+```
+
+Result: build passed. Vite/Rollup still reports existing third-party annotation and chunk-size warnings.
+
 ### Follow-up Fix: OPML Progressive Feed Visibility
 
 - Protected per-feed article counts learned from OPML stream item events until backend `/api/articles/counts` reports the same or higher value, preventing older aggregate responses from resetting already imported feeds to `0`.
