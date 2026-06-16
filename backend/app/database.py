@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import sys
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -11,13 +13,21 @@ SCHEMA_PATH = PACKAGED_BASE_DIR / "schema.sql"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 
-def get_connection() -> sqlite3.Connection:
+@contextmanager
+def get_connection() -> Iterator[sqlite3.Connection]:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 30000")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def initialize_database() -> None:
@@ -25,6 +35,7 @@ def initialize_database() -> None:
     with get_connection() as conn:
         conn.executescript(schema)
         _migrate_entries_table(conn)
+        _migrate_tag_tables(conn)
         _migrate_ai_tables(conn)
         _migrate_fts_table(conn)
     # Vector table requires the sqlite-vec extension, initialized separately
@@ -50,6 +61,36 @@ def _migrate_entries_table(conn: sqlite3.Connection) -> None:
     for column, statement in migrations.items():
         if column not in columns:
             conn.execute(statement)
+
+
+def _migrate_tag_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT NOT NULL DEFAULT '#409eff',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS article_tags (
+            entry_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (entry_id, tag_id),
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_feed_sort ON entries(feed_id, published_at, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_read_sort ON entries(is_read, published_at, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_starred_sort ON entries(is_starred, published_at, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_article_tags_tag_id ON article_tags(tag_id)")
 
 
 def _migrate_ai_tables(conn: sqlite3.Connection) -> None:

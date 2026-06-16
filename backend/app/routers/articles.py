@@ -1,19 +1,35 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas import ArticleRead
+from app.schemas import ArticleCounts, ArticleRead, PaginatedArticles
 from app.services import article_service
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[ArticleRead])
+@router.get("/counts", response_model=ArticleCounts)
+def article_counts():
+    return article_service.article_counts()
+
+
+@router.get("", response_model=PaginatedArticles)
 def list_articles(
     feed_id: int | None = None,
     tag_id: int | None = None,
     unread: bool | None = Query(default=None),
     starred: bool | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    sort_order: str = Query(default="newest", pattern="^(newest|oldest)$"),
 ):
-    return article_service.list_articles(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
+    return article_service.list_articles(
+        feed_id=feed_id,
+        tag_id=tag_id,
+        unread=unread,
+        starred=starred,
+        limit=limit,
+        offset=offset,
+        sort_order=sort_order,
+    )
 
 
 @router.get("/{article_id}", response_model=ArticleRead)

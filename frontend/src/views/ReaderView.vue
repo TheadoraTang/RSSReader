@@ -1,10 +1,10 @@
 <template>
   <div class="reader-shell" :class="readerShellClass">
-    <div class="reader-grid" v-loading="store.loading">
+    <div class="reader-grid" :style="readerGridStyle">
       <section class="panel sidebar-panel">
-        <div class="sidebar-header">
-          <h2>订阅与筛选</h2>
-        </div>
+<!--        <div class="sidebar-header">-->
+<!--          <h2>订阅与筛选</h2>-->
+<!--        </div>-->
 
         <div class="sidebar-static-filters">
           <button
@@ -41,36 +41,50 @@
             type="button"
             class="sidebar-filter-button"
             :class="{ active: activeTagId === tag.id }"
-            @click="activeTagId = activeTagId === tag.id ? null : tag.id"
+            @click="applyTagFilter(activeTagId === tag.id ? null : tag.id)"
           >
             <span class="tag-filter-label">
               <span class="tag-dot" :style="{ background: tag.color }"></span>
               <span>{{ tag.name }}</span>
             </span>
-            <span class="sidebar-filter-count">{{ tagArticleCount(tag.id) }}</span>
+            <span class="tag-filter-actions">
+              <span class="sidebar-filter-count">{{ tagArticleCount(tag.id) }}</span>
+              <span
+                role="button"
+                tabindex="0"
+                class="tag-delete-action"
+                :aria-label="`删除标签 ${tag.name}`"
+                title="删除标签"
+                @click.stop="deleteTag(tag.id)"
+                @keydown.enter.stop.prevent="deleteTag(tag.id)"
+                @keydown.space.stop.prevent="deleteTag(tag.id)"
+              >
+                <el-icon><Delete /></el-icon>
+              </span>
+            </span>
           </button>
         </div>
 
         <div class="sidebar-section-header">
-          <span class="sidebar-section-title">订阅源</span>
-          <div class="sidebar-section-actions">
-            <button type="button" class="sidebar-section-action" aria-label="添加订阅源" @click="openFeedManager">
-              <el-icon><Plus /></el-icon>
-            </button>
-            <el-dropdown trigger="click" @command="handleFeedSectionCommand">
-              <button type="button" class="sidebar-section-action" aria-label="订阅源更多操作">
-                <el-icon><MoreFilled /></el-icon>
-              </button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="manage-feeds">管理订阅源</el-dropdown-item>
-                  <el-dropdown-item command="sync-feeds" :disabled="syncingAllFeeds">
-                    {{ syncingAllFeeds ? '正在同步全部' : '同步全部订阅' }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
+<!--          <span class="sidebar-section-title">订阅源</span>-->
+<!--          <div class="sidebar-section-actions">-->
+<!--            <button type="button" class="sidebar-section-action" aria-label="添加订阅源" @click="openFeedManager">-->
+<!--              <el-icon><Plus /></el-icon>-->
+<!--            </button>-->
+<!--            <el-dropdown trigger="click" @command="handleFeedSectionCommand">-->
+<!--              <button type="button" class="sidebar-section-action" aria-label="订阅源更多操作">-->
+<!--                <el-icon><MoreFilled /></el-icon>-->
+<!--              </button>-->
+<!--              <template #dropdown>-->
+<!--                <el-dropdown-menu>-->
+<!--                  <el-dropdown-item command="manage-feeds">管理订阅源</el-dropdown-item>-->
+<!--                  <el-dropdown-item command="sync-feeds" :disabled="syncingAllFeeds">-->
+<!--                    {{ syncingAllFeeds ? '正在同步全部' : '同步全部订阅' }}-->
+<!--                  </el-dropdown-item>-->
+<!--                </el-dropdown-menu>-->
+<!--              </template>-->
+<!--            </el-dropdown>-->
+<!--          </div>-->
         </div>
         <el-scrollbar class="sidebar-feed-scrollbar">
           <div class="sidebar-group-content sidebar-feed-list">
@@ -99,7 +113,19 @@
         </el-scrollbar>
       </section>
 
-      <section v-if="!feedManagerOpen" class="panel scroll-panel article-list-panel">
+      <div
+        class="reader-resizer sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-label="store.leftSidebarVisible ? '调整或隐藏订阅栏' : '显示订阅栏'"
+        @pointerdown="startSidebarResize"
+      >
+        <button type="button" class="reader-resizer-toggle" @click.stop="toggleSidebarFromResizer">
+          {{ store.leftSidebarVisible ? '<' : '>' }}
+        </button>
+      </div>
+
+      <section v-if="!feedManagerOpen" class="panel scroll-panel article-list-panel" @scroll.passive="handleArticleListScroll">
         <div class="article-list-header">
           <h2>{{ currentListTitle }}</h2>
           <div class="article-list-topbar-right">
@@ -165,6 +191,10 @@
           </div>
         </div>
 
+        <div v-if="store.loading && filteredArticles.length === 0" class="article-list-loading">
+          <el-icon class="article-list-loading-icon"><Loading /></el-icon>
+          <span>正在加载文章</span>
+        </div>
         <article
           v-for="article in filteredArticles"
           :key="article.id"
@@ -189,17 +219,50 @@
           </button>
           <div class="article-card-meta-row">
             <span class="article-card-source">{{ article.feed_title }}</span>
-            <span class="article-card-date">{{ formatArticleDate(article) }}</span>
+            <div class="article-card-meta-right">
+              <span class="article-card-date">{{ formatArticleDate(article) }}</span>
+              <div class="article-card-actions">
+                <el-tooltip :content="article.is_read ? '标记未读' : '标记已读'" placement="top">
+                  <button
+                    type="button"
+                    class="article-action-button"
+                    :class="{ active: article.is_read }"
+                    @click.stop="toggleArticleRead(article)"
+                  >
+                    <el-icon><Check /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip :content="store.isPinned(article.id) ? '取消置顶' : '置顶'" placement="top">
+                  <button
+                    type="button"
+                    class="article-action-button"
+                    :class="{ active: store.isPinned(article.id) }"
+                    @click.stop="store.togglePinned(article.id)"
+                  >
+                    <el-icon><Top /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip :content="article.is_starred ? '取消收藏' : '收藏'" placement="top">
+                  <button
+                    type="button"
+                    class="article-action-button"
+                    :class="{ active: article.is_starred }"
+                    @click.stop="toggleArticleStar(article)"
+                  >
+                    <el-icon><Star /></el-icon>
+                  </button>
+                </el-tooltip>
+              </div>
+            </div>
           </div>
 
           <div class="article-card-main" :class="{ 'with-thumbnail': Boolean(store.showThumbnails && articleThumbnail(article)) }">
             <div class="article-card-copy">
-              <h3 v-html="renderTitleInlineHtml(article.title)"></h3>
+              <h3 class="article-card-title" :class="{ unread: !article.is_read }" v-html="renderTitleInlineHtml(article.title)"></h3>
               <p v-if="articleListSummary(article)" class="article-card-summary" :style="summaryClampStyle">
                 {{ articleListSummary(article) }}
               </p>
               <div class="article-card-tags">
-                <el-tag v-if="!article.is_read" size="small">未读</el-tag>
                 <el-tag v-if="article.is_starred" size="small" type="warning">收藏</el-tag>
                 <el-tag v-if="store.isPinned(article.id)" size="small" effect="plain">置顶</el-tag>
                 <el-tag
@@ -223,27 +286,47 @@
             </div>
           </div>
         </article>
+        <div v-if="store.pagination.hasMore || store.loadingMore" class="article-list-load-more">
+          <el-button :loading="store.loadingMore" @click="loadMoreArticles">
+            {{ store.loadingMore ? '正在加载' : '加载更多' }}
+          </el-button>
+        </div>
+        <div v-else-if="!store.loading && filteredArticles.length === 0" class="article-list-empty">
+          当前列表没有文章
+        </div>
       </section>
+
+      <div
+        v-if="!feedManagerOpen"
+        class="reader-resizer article-list-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-label="store.articleListVisible ? '调整或隐藏文章列表' : '显示文章列表'"
+        @pointerdown="startArticleListResize"
+      >
+        <button type="button" class="reader-resizer-toggle" @click.stop="toggleArticleListFromResizer">
+          {{ store.articleListVisible ? '<' : '>' }}
+        </button>
+      </div>
 
       <section v-if="store.selectedArticle && !feedManagerOpen" class="panel reader-detail-panel">
         <div class="toolbar detail-toolbar">
-          <el-tooltip :content="store.selectedArticle.is_read ? '标记未读' : '标记已读'" placement="top">
-            <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_read }" :icon="Check" circle @click="store.toggleRead(store.selectedArticle)" />
-          </el-tooltip>
-          <el-tooltip :content="store.isPinned(store.selectedArticle.id) ? '取消置顶' : '置顶'" placement="top">
-            <el-button class="toolbar-icon-button" :class="{ active: store.isPinned(store.selectedArticle.id) }" :icon="Top" circle @click="togglePinnedSelected" />
-          </el-tooltip>
-          <el-tooltip :content="store.selectedArticle.is_starred ? '取消收藏' : '收藏'" placement="top">
-            <el-button class="toolbar-icon-button" :class="{ active: store.selectedArticle.is_starred }" :icon="Star" circle @click="store.toggleStar(store.selectedArticle)" />
-          </el-tooltip>
           <el-popover placement="bottom" :width="320" trigger="click" popper-class="tag-popover">
             <template #reference>
               <el-button class="toolbar-icon-button" :icon="CollectionTag" circle aria-label="标签" title="标签" />
             </template>
             <div class="tag-popover-body">
-              <div class="tag-selection-list">
+              <el-input
+                v-model="tagSearchQuery"
+                class="tag-search-input"
+                size="small"
+                clearable
+                placeholder="搜索标签"
+                @keyup.enter="createAndAssignTagFromSearch"
+              />
+              <div v-if="filteredTagOptions.length" class="tag-selection-list">
                 <button
-                  v-for="tag in store.tags"
+                  v-for="tag in filteredTagOptions"
                   :key="tag.id"
                   type="button"
                   class="tag-selection-item"
@@ -254,9 +337,24 @@
                     <span class="tag-dot" :style="{ background: tag.color }"></span>
                     <span>{{ tag.name }}</span>
                   </span>
-                  <el-icon v-if="selectedArticleTagIds.includes(tag.id)"><Check /></el-icon>
+                  <span class="tag-selection-actions">
+                    <el-icon v-if="selectedArticleTagIds.includes(tag.id)"><Check /></el-icon>
+                    <span
+                      role="button"
+                      tabindex="0"
+                      class="tag-delete-action"
+                      :aria-label="`删除标签 ${tag.name}`"
+                      title="删除标签"
+                      @click.stop="deleteTag(tag.id)"
+                      @keydown.enter.stop.prevent="deleteTag(tag.id)"
+                      @keydown.space.stop.prevent="deleteTag(tag.id)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </span>
+                  </span>
                 </button>
               </div>
+              <div v-else class="tag-selection-empty">没有匹配标签</div>
               <div class="tag-creator-card">
                 <div class="tag-create-row">
                   <el-input
@@ -328,22 +426,24 @@
         </div>
 
         <div class="reader-scroll-area">
-          <header class="reader-hero">
-            <div class="reader-source-row">
-              <span class="reader-source-name">{{ store.selectedArticle.feed_title }}</span>
+          <div class="reader-content-frame">
+            <header class="reader-hero">
+              <div class="reader-source-row">
+                <span class="reader-source-name">{{ store.selectedArticle.feed_title }}</span>
+              </div>
+              <h1 class="reader-title" v-html="renderTitleInlineHtml(store.selectedArticle.title)"></h1>
+              <div class="reader-source-link-row">
+                <a class="reader-source-link" :href="store.selectedArticle.url" target="_blank" rel="noopener noreferrer">
+                  {{ store.selectedArticle.url }}
+                </a>
+              </div>
+              <div class="reader-meta">
+                <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }}</span>
+                <span v-if="readerPublishedAt(store.selectedArticle)">{{ readerPublishedAt(store.selectedArticle) }}</span>
+              </div>
+            </header>
+            <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
             </div>
-            <h1 class="reader-title" v-html="renderTitleInlineHtml(store.selectedArticle.title)"></h1>
-            <div class="reader-source-link-row">
-              <a class="reader-source-link" :href="store.selectedArticle.url" target="_blank" rel="noopener noreferrer">
-                {{ store.selectedArticle.url }}
-              </a>
-            </div>
-            <div class="reader-meta">
-              <span v-if="store.selectedArticle.author">{{ store.selectedArticle.author }}</span>
-              <span v-if="readerPublishedAt(store.selectedArticle)">{{ readerPublishedAt(store.selectedArticle) }}</span>
-            </div>
-          </header>
-          <div ref="articleBodyRef" class="article-body" v-html="renderedArticleHtml"></div>
         </div>
 
         <!-- 底部摘要抽屉 -->
@@ -427,6 +527,10 @@
           </div>
         </div>
       </section>
+      <section v-else-if="!feedManagerOpen" class="panel reader-detail-panel reader-empty-panel">
+        <div class="reader-empty-state">
+        </div>
+      </section>
 
       <section v-if="feedManagerOpen" class="panel feed-manager-overlay">
         <FeedManageView embedded @close="closeFeedManager" @changed="handleFeedManagerChanged" />
@@ -505,12 +609,13 @@
 </template>
 
 <script setup lang="ts">
-import { Check, Close, CollectionTag, CopyDocument, Download, EditPen, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
+import { Check, Close, CollectionTag, CopyDocument, Delete, Download, EditPen, Files, Loading, MagicStick, MoreFilled, Plus, Refresh, Star, Switch, Top } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Article, BatchDigestExportResponse, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
+import type { Article, ArticleListItem, BatchDigestExportResponse, FeedSyncReport, LLMProvider, SummaryStreamEvent } from '../api/client'
 import { getErrorMessage, rssApi } from '../api/client'
+import type { ArticleListQuery } from '../stores/reader'
 import { useReaderStore } from '../stores/reader'
 import { apiErrorMessage, showSyncReportMessage, statusTagType, syncSuggestion } from '../utils/syncDiagnostics'
 import FeedManageView from './FeedManageView.vue'
@@ -518,6 +623,13 @@ import FeedManageView from './FeedManageView.vue'
 const store = useReaderStore()
 const route = useRoute()
 const router = useRouter()
+const SIDEBAR_WIDTH_KEY = 'rssreader.sidebarWidth'
+const ARTICLE_LIST_WIDTH_KEY = 'rssreader.articleListWidth'
+const SIDEBAR_MIN_WIDTH = 156
+const SIDEBAR_MAX_WIDTH = 360
+const ARTICLE_LIST_MIN_WIDTH = 172
+const ARTICLE_LIST_MAX_WIDTH = 560
+const RESIZER_WIDTH = 20
 const note = ref('')
 const lastSavedNote = ref('')
 const notePopoverOpen = ref(false)
@@ -637,15 +749,29 @@ const selectedBatchArticleIds = ref<number[]>([])
 const batchIncludeFullText = ref(false)
 const newTagName = ref('')
 const newTagColor = ref('#5b8def')
+const tagSearchQuery = ref('')
 const failedThumbnailKeys = ref<Set<string>>(new Set())
-const stableArticleThumbnails = ref<Record<number, string>>({})
 const failedFeedIconIds = ref<Set<number>>(new Set())
 const syncingAllFeeds = ref(false)
 const homeSyncDialogOpen = ref(false)
 const lastHomeSyncReport = ref<FeedSyncReport | null>(null)
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1440)
+const sidebarWidth = ref(storedPanelWidth(SIDEBAR_WIDTH_KEY, 244, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
+const articleListWidth = ref(storedPanelWidth(ARTICLE_LIST_WIDTH_KEY, 392, ARTICLE_LIST_MIN_WIDTH, ARTICLE_LIST_MAX_WIDTH))
+const suppressNextSidebarToggle = ref(false)
+const suppressNextArticleListToggle = ref(false)
 const NOTE_AUTOSAVE_DELAY_MS = 900
 let noteSaveTimer: number | undefined
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function storedPanelWidth(key: string, fallback: number, min: number, max: number) {
+  const raw = localStorage.getItem(key)
+  const value = raw ? Number(raw) : fallback
+  return Number.isFinite(value) ? clampNumber(value, min, max) : fallback
+}
 
 const renderedArticleHtml = computed(() => {
   const article = store.selectedArticle
@@ -657,10 +783,15 @@ const renderedArticleHtml = computed(() => {
 })
 
 const selectedArticleTagIds = computed(() => store.selectedArticle?.tag_ids ?? [])
+const filteredTagOptions = computed(() => {
+  const keyword = tagSearchQuery.value.trim().toLowerCase()
+  if (!keyword) return store.tags
+  return store.tags.filter((tag) => tag.name.toLowerCase().includes(keyword))
+})
 const quickFilters = computed(() => [
-  { key: 'all' as const, label: '全部文章', count: store.articles.length },
-  { key: 'unread' as const, label: '未读文章', count: store.articles.filter((article) => !article.is_read).length },
-  { key: 'starred' as const, label: '收藏', count: store.articles.filter((article) => article.is_starred).length }
+  { key: 'all' as const, label: '全部文章', count: store.articleCounts.total },
+  { key: 'unread' as const, label: '未读文章', count: store.articleCounts.unread },
+  { key: 'starred' as const, label: '收藏', count: store.articleCounts.starred }
 ])
 
 const activeFeedForMenu = computed(() => {
@@ -669,17 +800,16 @@ const activeFeedForMenu = computed(() => {
   return null
 })
 
-const filteredArticles = computed(() => {
-  let list = [...store.articles]
-  if (activeFilterKey.value === 'unread') list = list.filter((article) => !article.is_read)
-  if (activeFilterKey.value === 'starred') list = list.filter((article) => article.is_starred)
-  if (activeFeedId.value !== null) list = list.filter((article) => article.feed_id === activeFeedId.value)
-  if (activeTagId.value !== null) {
-    const tagId = activeTagId.value
-    list = list.filter((article) => article.tag_ids.includes(tagId))
-  }
-  return list
+const activeArticleQuery = computed<ArticleListQuery>(() => {
+  const query: ArticleListQuery = { sort_order: store.articleSortOrder }
+  if (activeFeedId.value !== null) query.feed_id = activeFeedId.value
+  if (activeTagId.value !== null) query.tag_id = activeTagId.value
+  if (activeFilterKey.value === 'unread') query.unread = true
+  if (activeFilterKey.value === 'starred') query.starred = true
+  return query
 })
+
+const filteredArticles = computed(() => store.articleItems)
 
 const selectedBatchArticleIdSet = computed(() => new Set(selectedBatchArticleIds.value))
 const batchSelectedArticles = computed(() =>
@@ -711,7 +841,7 @@ const renderedAiResult = computed(() => {
     'overview': '💬', 'résumé': '💬', 'zusammenfassung': '💬', 'resumen': '💬', 'resumo': '💬', 'резюме': '💬', 'ملخص': '💬', '요약': '💬',
     'key': '📌', 'takeaway': '📌', 'puntos': '📌', 'points': '📌', 'wichtig': '📌', 'моменты': '📌', 'النقاط': '📌', '포인트': '📌', 'ポイント': '📌',
     'keyword': '🏷️',
-    'background': '📖', 'contexte': '📖', 'hintergrund': '📖', 'contexto': '📖', 'контекст': '📖', 'الخلفية': '📖', '배경': '📖', '背景': '📖',
+    'background': '📖', 'contexte': '📖', 'hintergrund': '📖', 'contexto': '📖', 'контекст': '📖', 'الخلفية': '📖', '배경': '📖',
     'follow': '🔍', 'suivre': '🔍', 'verfolgung': '🔍', 'acompanhar': '🔍', 'следить': '🔍', '追う': '🔍', '추적': '🔍',
   }
   html = html.replace(/<h2>(.*?)<\/h2>/g, (_, text) => {
@@ -748,16 +878,32 @@ const noteSaveStatusText = computed(() => {
   return '自动保存'
 })
 const homeSyncResults = computed(() => lastHomeSyncReport.value?.results ?? [])
+const isSidebarHidden = computed(() => !store.leftSidebarVisible || viewportWidth.value <= 1220)
+const isArticleListHidden = computed(() =>
+  !store.articleListVisible || (viewportWidth.value <= 900 && Boolean(store.selectedArticle) && !feedManagerOpen.value)
+)
+const readerGridStyle = computed(() => ({
+  gridTemplateColumns: [
+    isSidebarHidden.value ? '0px' : `${sidebarWidth.value}px`,
+    `${RESIZER_WIDTH}px`,
+    isArticleListHidden.value || feedManagerOpen.value ? '0px' : `${articleListWidth.value}px`,
+    feedManagerOpen.value ? '0px' : `${RESIZER_WIDTH}px`,
+    'minmax(0, 1fr)'
+  ].join(' ')
+}))
 const readerShellClass = computed(() => ({
-  'sidebar-hidden': viewportWidth.value <= 1220,
-  'article-list-hidden': viewportWidth.value <= 900 && Boolean(store.selectedArticle) && !feedManagerOpen.value
+  'sidebar-hidden': isSidebarHidden.value,
+  'article-list-hidden': isArticleListHidden.value,
+  'sidebar-compact': !isSidebarHidden.value && sidebarWidth.value < 210,
+  'article-list-compact': !isArticleListHidden.value && articleListWidth.value < 260,
+  'article-list-micro': !isArticleListHidden.value && articleListWidth.value < 210
 }))
 
 onMounted(async () => {
   window.addEventListener('rssreader:background-sync', handleBackgroundSync)
   window.addEventListener('resize', handleWindowResize)
   handleWindowResize()
-  await store.loadAll()
+  await reloadArticleList()
   await loadSummaryProviders()
   const articleId = route.query.article
   if (articleId) {
@@ -765,7 +911,7 @@ onMounted(async () => {
     void router.replace({ path: '/', query: { ...route.query, article: undefined } })
   }
   await loadNote()
-  ensureVisibleSelection()
+  await ensureVisibleSelection()
 })
 
 onUnmounted(() => {
@@ -782,7 +928,9 @@ watch(
       try {
         await flushNote({ articleId: oldId, content: note.value })
       } catch {
-        ElMessage.error('保存上一条文章笔记失败')
+        if (store.hasArticle(oldId)) {
+          ElMessage.error('保存上一条文章笔记失败')
+        }
       }
     }
     clearSummaryResult()
@@ -800,20 +948,9 @@ watch(notePopoverOpen, (open) => {
   }
 })
 watch(renderedArticleHtml, decorateArticleLinks, { flush: 'post' })
-watch(
-  () => store.articles,
-  (articles) => {
-    stableArticleThumbnails.value = articles.reduce<Record<number, string>>((cache, article) => {
-      const current = cache[article.id]
-      if (current) return cache
-      const src = extractImageSrc(article.cleaned_html || article.raw_html || '')
-      if (src) cache[article.id] = src
-      return cache
-    }, { ...stableArticleThumbnails.value })
-  },
-  { immediate: true }
-)
-watch(filteredArticles, ensureVisibleSelection)
+watch(filteredArticles, () => {
+  void ensureVisibleSelection()
+})
 watch(filteredArticles, (articles) => {
   if (!batchExportMode.value) return
   const articleIds = new Set(articles.map((article) => article.id))
@@ -831,7 +968,7 @@ watch(
 )
 
 async function handleBackgroundSync() {
-  await store.loadAll()
+  await reloadArticleList()
   await loadNote()
 }
 
@@ -839,11 +976,130 @@ function handleWindowResize() {
   viewportWidth.value = window.innerWidth
 }
 
-async function handleFeedManagerChanged() {
-  await store.loadAll()
+function toggleSidebarVisible() {
+  store.setLeftSidebarVisible(!store.leftSidebarVisible)
+}
+
+function toggleArticleListVisible() {
+  if (store.articleListVisible && !store.selectedArticle && filteredArticles.value[0]) {
+    void store.selectArticle(filteredArticles.value[0].id)
+  }
+  store.setArticleListVisible(!store.articleListVisible)
+}
+
+function toggleSidebarFromResizer() {
+  if (suppressNextSidebarToggle.value) {
+    suppressNextSidebarToggle.value = false
+    return
+  }
+  toggleSidebarVisible()
+}
+
+function toggleArticleListFromResizer() {
+  if (suppressNextArticleListToggle.value) {
+    suppressNextArticleListToggle.value = false
+    return
+  }
+  toggleArticleListVisible()
+}
+
+function startSidebarResize(event: PointerEvent) {
+  if (isArticleListHidden.value && isSidebarHidden.value) {
+    startPanelResize('article-list', event)
+    return
+  }
+  startPanelResize('sidebar', event)
+}
+
+function startArticleListResize(event: PointerEvent) {
+  startPanelResize('article-list', event)
+}
+
+function startPanelResize(kind: 'sidebar' | 'article-list', event: PointerEvent) {
+  if (event.button !== 0) return
+  event.preventDefault()
+
+  const startX = event.clientX
+  const startWidth = kind === 'sidebar'
+    ? (store.leftSidebarVisible ? sidebarWidth.value : 0)
+    : (store.articleListVisible ? articleListWidth.value : 0)
+  let moved = false
+  const previousCursor = document.body.style.cursor
+  const previousUserSelect = document.body.style.userSelect
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  const onMove = (moveEvent: PointerEvent) => {
+    const delta = moveEvent.clientX - startX
+    if (Math.abs(delta) > 3) moved = true
+    const next = startWidth + delta
+    if (kind === 'sidebar') {
+      if (next < 80) {
+        store.setLeftSidebarVisible(false)
+        return
+      }
+      const width = clampNumber(next, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+      sidebarWidth.value = width
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+      store.setLeftSidebarVisible(true)
+      return
+    }
+
+    if (next < 100) {
+      store.setArticleListVisible(false)
+      return
+    }
+    const width = clampNumber(next, ARTICLE_LIST_MIN_WIDTH, ARTICLE_LIST_MAX_WIDTH)
+    articleListWidth.value = width
+    localStorage.setItem(ARTICLE_LIST_WIDTH_KEY, String(width))
+    store.setArticleListVisible(true)
+  }
+
+  const onUp = () => {
+    document.body.style.cursor = previousCursor
+    document.body.style.userSelect = previousUserSelect
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    if (moved) {
+      if (kind === 'sidebar') suppressNextSidebarToggle.value = true
+      else suppressNextArticleListToggle.value = true
+      window.setTimeout(() => {
+        suppressNextSidebarToggle.value = false
+        suppressNextArticleListToggle.value = false
+      }, 0)
+    }
+  }
+
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp, { once: true })
+}
+
+async function handleFeedManagerChanged(options?: { reload?: boolean }) {
+  if (options?.reload !== false) {
+    await reloadArticleList()
+  } else {
+    await store.loadCounts()
+  }
   await loadNote()
   if (activeFeedId.value !== null && !store.feeds.some((feed) => feed.id === activeFeedId.value)) {
     activeFeedId.value = null
+  }
+}
+
+async function reloadArticleList() {
+  await store.loadAll(activeArticleQuery.value)
+}
+
+async function loadMoreArticles() {
+  await store.loadMore(activeArticleQuery.value)
+}
+
+function handleArticleListScroll(event: Event) {
+  const target = event.currentTarget as HTMLElement | null
+  if (!target || store.loadingMore || !store.pagination.hasMore) return
+  const remaining = target.scrollHeight - target.scrollTop - target.clientHeight
+  if (remaining < 240) {
+    void loadMoreArticles()
   }
 }
 
@@ -862,6 +1118,11 @@ async function loadNote() {
     lastSavedNote.value = data.content_markdown
     noteSaveState.value = data.content_markdown.trim() ? 'saved' : 'idle'
     await nextTick()
+  } catch (error) {
+    console.warn('Failed to load note', error)
+    note.value = ''
+    lastSavedNote.value = ''
+    noteSaveState.value = 'idle'
   } finally {
     noteLoading.value = false
   }
@@ -892,13 +1153,13 @@ async function decorateArticleLinks() {
   })
 }
 
-function ensureVisibleSelection() {
+async function ensureVisibleSelection() {
   if (!filteredArticles.value.length) {
     store.selectedArticle = null
     return
   }
   if (!filteredArticles.value.find((article) => article.id === store.selectedArticle?.id)) {
-    store.selectedArticle = filteredArticles.value[0]
+    await store.selectArticle(filteredArticles.value[0].id, { markRead: false })
   }
 }
 
@@ -908,6 +1169,7 @@ function applyQuickFilter(key: 'all' | 'unread' | 'starred') {
   activeFeedId.value = null
   activeTagId.value = null
   closeFeedManager()
+  void reloadArticleList()
 }
 
 function applyFeedFilter(feedId: number | null) {
@@ -916,6 +1178,16 @@ function applyFeedFilter(feedId: number | null) {
   activeTagId.value = null
   activeFilterKey.value = 'all'
   closeFeedManager()
+  void reloadArticleList()
+}
+
+function applyTagFilter(tagId: number | null) {
+  exitBatchExportMode()
+  activeTagId.value = tagId
+  activeFeedId.value = null
+  activeFilterKey.value = 'all'
+  closeFeedManager()
+  void reloadArticleList()
 }
 
 function openFeedManager() {
@@ -936,26 +1208,26 @@ function closeFeedManager() {
 }
 
 function tagArticleCount(tagId: number) {
-  return store.articles.filter((article) => article.tag_ids.includes(tagId)).length
+  return store.articleCounts.by_tag[tagId] ?? 0
 }
 
 function tagName(tagId: number) {
   return store.tags.find((tag) => tag.id === tagId)?.name ?? '标签'
 }
 
-function articleThumbnail(article: Article) {
-  const src = stableArticleThumbnails.value[article.id] || extractImageSrc(article.cleaned_html || article.raw_html || '')
+function articleThumbnail(article: ArticleListItem) {
+  const src = extractImageSrc(article.summary || '')
   if (!src || failedThumbnailKeys.value.has(thumbnailKey(article, src))) return null
   return src
 }
 
-function handleThumbnailError(article: Article) {
+function handleThumbnailError(article: ArticleListItem) {
   const src = articleThumbnail(article)
   if (!src) return
   failedThumbnailKeys.value = new Set([...failedThumbnailKeys.value, thumbnailKey(article, src)])
 }
 
-function thumbnailKey(article: Article, src: string) {
+function thumbnailKey(article: ArticleListItem, src: string) {
   return `${article.id}:${src}`
 }
 
@@ -964,7 +1236,7 @@ function handleFeedIconError(feedId: number) {
 }
 
 function feedArticleCount(feedId: number) {
-  return store.articles.filter((article) => article.feed_id === feedId).length
+  return store.articleCounts.by_feed[feedId] ?? 0
 }
 
 function feedFaviconUrl(feed: { id: number; site_url?: string; url: string }) {
@@ -978,8 +1250,8 @@ function extractImageSrc(html: string) {
   return matched?.[1] ?? null
 }
 
-function articleListSummary(article: Article) {
-  const source = article.summary || article.cleaned_html || article.raw_html || ''
+function articleListSummary(article: ArticleListItem) {
+  const source = article.summary || ''
   const text = htmlToPlainText(source)
   return text.length > 180 ? `${text.slice(0, 180).trim()}...` : text
 }
@@ -990,7 +1262,7 @@ function htmlToPlainText(value: string) {
   return (document.body.textContent || value).replace(/\s+/g, ' ').trim()
 }
 
-function formatArticleDate(article: Article) {
+function formatArticleDate(article: ArticleListItem) {
   const source = article.published_at || article.created_at
   if (!source) return ''
   const date = new Date(source)
@@ -1015,14 +1287,21 @@ function readerPublishedAt(article: Article) {
 async function createTag() {
   const name = newTagName.value.trim()
   if (!name) return
-  const created = await rssApi.createTag({ name, color: newTagColor.value })
-  store.tags = [...store.tags, created]
-  newTagName.value = ''
+  try {
+    const tag = await store.createTag({ name, color: newTagColor.value })
+    newTagName.value = ''
+    return tag
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '创建标签失败'))
+  }
 }
 
 async function updateSelectedArticleTags(tagIds: number[]) {
   if (!store.selectedArticle) return
   await store.setArticleTags(store.selectedArticle.id, tagIds)
+  if (activeTagId.value !== null) {
+    await reloadArticleList()
+  }
 }
 
 async function toggleSelectedArticleTag(tagId: number) {
@@ -1034,6 +1313,28 @@ async function toggleSelectedArticleTag(tagId: number) {
     current.add(tagId)
   }
   await updateSelectedArticleTags(Array.from(current))
+}
+
+async function createAndAssignTagFromSearch() {
+  const name = tagSearchQuery.value.trim()
+  if (!name || !store.selectedArticle) return
+  const matchedTag = store.tags.find((tag) => tag.name.trim().toLowerCase() === name.toLowerCase())
+  const tag = matchedTag ?? await store.createTag({ name, color: newTagColor.value })
+  if (!selectedArticleTagIds.value.includes(tag.id)) {
+    await updateSelectedArticleTags([...selectedArticleTagIds.value, tag.id])
+  }
+  tagSearchQuery.value = ''
+}
+
+async function deleteTag(tagId: number) {
+  const deletingActiveTag = activeTagId.value === tagId
+  await store.deleteTag(tagId)
+  if (deletingActiveTag) {
+    activeTagId.value = null
+    await reloadArticleList()
+  } else if (activeTagId.value !== null) {
+    await reloadArticleList()
+  }
 }
 
 function clearNoteSaveTimer() {
@@ -1069,7 +1370,7 @@ async function flushNote(options: { articleId?: number; content?: string; showSu
   const articleId = options.articleId ?? store.selectedArticle?.id
   if (!articleId) return
   const content = options.content ?? note.value
-  if (options.articleId === undefined && content === lastSavedNote.value) {
+  if (content === lastSavedNote.value) {
     noteSaveState.value = content.trim() ? 'saved' : 'idle'
     if (options.showSuccess) ElMessage.success('笔记已保存')
     return
@@ -1140,7 +1441,29 @@ function handleArticleClick(articleId: number) {
     return
   }
   closeFeedManager()
-  void store.selectArticle(articleId)
+  void store.selectArticle(articleId, { markRead: true })
+}
+
+function toggleArticleRead(article: ArticleListItem) {
+  void store
+    .toggleRead(article)
+    .then(() => {
+      if (activeFilterKey.value === 'unread') void reloadArticleList()
+    })
+    .catch((error) => {
+      ElMessage.error(getErrorMessage(error, '更新已读状态失败'))
+    })
+}
+
+function toggleArticleStar(article: ArticleListItem) {
+  void store
+    .toggleStar(article)
+    .then(() => {
+      if (activeFilterKey.value === 'starred') void reloadArticleList()
+    })
+    .catch((error) => {
+      ElMessage.error(getErrorMessage(error, '更新收藏状态失败'))
+    })
 }
 
 function handleExportCommand(command: string) {
@@ -1283,8 +1606,14 @@ async function copyText(text: string) {
 function handleListMenuCommand(command: string) {
   if (command === 'sync') void syncAll()
   if (command === 'batch-export') beginMultiExportMode()
-  if (command === 'sort:newest') store.setArticleSortOrder('newest')
-  if (command === 'sort:oldest') store.setArticleSortOrder('oldest')
+  if (command === 'sort:newest') {
+    store.setArticleSortOrder('newest')
+    void reloadArticleList()
+  }
+  if (command === 'sort:oldest') {
+    store.setArticleSortOrder('oldest')
+    void reloadArticleList()
+  }
   if (command === 'toggle:thumbnails') store.setShowThumbnails(!store.showThumbnails)
   if (command === 'unsubscribe') void unsubscribeCurrentFeed()
 }
@@ -1298,8 +1627,8 @@ async function unsubscribeCurrentFeed() {
   const feed = activeFeedForMenu.value
   if (!feed) return
   await rssApi.deleteFeed(feed.id)
-  await store.loadAll()
   activeFeedId.value = null
+  await reloadArticleList()
 }
 
 function decreaseSummaryLines() {
@@ -1308,11 +1637,6 @@ function decreaseSummaryLines() {
 
 function increaseSummaryLines() {
   store.setSummaryLineCount(Math.min(5, store.summaryLineCount + 1))
-}
-
-function togglePinnedSelected() {
-  if (!store.selectedArticle) return
-  store.togglePinned(store.selectedArticle.id)
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {
@@ -1589,7 +1913,7 @@ async function syncAll() {
   try {
     const report = await rssApi.syncAll()
     lastHomeSyncReport.value = report
-    await store.loadAll()
+    await reloadArticleList()
     await loadNote()
     showSyncReportMessage(report)
     if (report.failed > 0) {
@@ -1647,7 +1971,84 @@ async function exportNote() {
 }
 
 .reader-shell.sidebar-hidden .feed-manager-overlay {
-  grid-column: 1 / 3;
+  grid-column: 3 / 6;
+}
+
+.sidebar-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.sidebar-resizer {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.article-list-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.article-list-resizer {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.reader-detail-panel {
+  grid-column: 5;
+  grid-row: 1;
+}
+
+.reader-resizer {
+  position: relative;
+  z-index: 5;
+  height: 100%;
+  min-width: 20px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(50% - 0.5px),
+      color-mix(in srgb, var(--app-border) 86%, transparent 14%) calc(50% - 0.5px),
+      color-mix(in srgb, var(--app-border) 86%, transparent 14%) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px),
+      transparent 100%
+    );
+  transition: background-color 0.18s ease;
+}
+
+.reader-resizer:hover {
+  background-color: color-mix(in srgb, var(--theme-accent) 6%, transparent 94%);
+}
+
+.reader-resizer-toggle {
+  width: 28px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 78%, transparent 22%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-surface-strong) 94%, var(--app-bg) 6%);
+  color: color-mix(in srgb, currentColor 62%, transparent 38%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--app-text) 6%, transparent 94%);
+  transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.reader-resizer-toggle:hover {
+  border-color: color-mix(in srgb, var(--theme-accent) 46%, var(--app-border) 54%);
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--app-surface) 90%);
+  color: var(--theme-accent);
+  transform: scale(1.04);
 }
 
 .sidebar-panel {
@@ -1763,6 +2164,23 @@ async function exportNote() {
   padding-right: 4px;
 }
 
+.reader-shell.sidebar-compact .sidebar-panel {
+  padding-inline: 8px;
+}
+
+.reader-shell.sidebar-compact .sidebar-header h2,
+.reader-shell.sidebar-compact .sidebar-section-title {
+  font-size: 14px;
+}
+
+.reader-shell.sidebar-compact .sidebar-primary-link,
+.reader-shell.sidebar-compact .sidebar-filter-button,
+.reader-shell.sidebar-compact .sidebar-feed-button,
+.reader-shell.sidebar-compact .sidebar-group-toggle {
+  padding-inline: 8px;
+  gap: 6px;
+}
+
 .sidebar-chevron {
   transition: transform 0.25s ease;
 }
@@ -1799,12 +2217,47 @@ async function exportNote() {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.tag-filter-label span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.tag-filter-actions,
+.tag-selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.tag-delete-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, currentColor 42%, transparent 58%);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.tag-delete-action:hover,
+.tag-delete-action:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--el-color-danger) 12%, var(--app-surface) 88%);
+  color: color-mix(in srgb, var(--el-color-danger) 86%, currentColor 14%);
 }
 
 .sidebar-feed-button {
@@ -1882,6 +2335,59 @@ async function exportNote() {
   border-width: 0 1px 0 0;
   box-shadow: none;
   padding: 16px 14px 20px;
+}
+
+.reader-shell.article-list-compact .article-list-panel {
+  padding-inline: 10px;
+}
+
+.reader-shell.article-list-compact .article-list-header {
+  gap: 8px;
+}
+
+.reader-shell.article-list-compact .article-list-header h2 {
+  font-size: 15px;
+}
+
+.reader-shell.article-list-compact .article-card {
+  min-height: 74px;
+  padding: 9px 10px;
+}
+
+.reader-shell.article-list-compact .article-card-main.with-thumbnail {
+  grid-template-columns: 1fr;
+}
+
+.reader-shell.article-list-compact .article-card-thumb {
+  display: none;
+}
+
+.reader-shell.article-list-compact .article-card-summary,
+.reader-shell.article-list-micro .article-card-tags,
+.reader-shell.article-list-micro .article-card-source {
+  display: none;
+}
+
+.reader-shell.article-list-compact .article-card-meta-row {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.reader-shell.article-list-compact .article-card-meta-right {
+  justify-content: space-between;
+}
+
+.reader-shell.article-list-compact .article-card-copy h3 {
+  font-size: 13px;
+}
+
+.reader-shell.article-list-compact .article-action-button {
+  width: 22px;
+  height: 22px;
+}
+
+.reader-shell.article-list-micro .article-card-date {
+  text-align: left;
 }
 
 .summary-result-alert {
@@ -2254,6 +2760,10 @@ async function exportNote() {
   transition: all 0.24s ease;
 }
 
+.article-card.pinned {
+  border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--app-border) 62%);
+}
+
 .article-card.active {
   background: color-mix(in srgb, var(--theme-accent) 14%, var(--app-surface) 86%);
   border-color: color-mix(in srgb, var(--theme-accent) 36%, var(--app-border) 64%);
@@ -2295,7 +2805,7 @@ async function exportNote() {
 
 .article-card-meta-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
@@ -2314,6 +2824,46 @@ async function exportNote() {
   line-height: 1.25;
 }
 
+.article-card-meta-right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.article-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.article-action-button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 70%, transparent 30%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-surface-strong) 82%, var(--app-bg) 18%);
+  color: color-mix(in srgb, currentColor 48%, transparent 52%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.article-action-button:hover,
+.article-action-button.active {
+  border-color: color-mix(in srgb, var(--theme-accent) 52%, var(--app-border) 48%);
+  background: color-mix(in srgb, var(--theme-accent) 14%, var(--app-surface) 86%);
+  color: color-mix(in srgb, var(--theme-accent) 86%, currentColor 14%);
+}
+
+.article-action-button :deep(.el-icon) {
+  font-size: 13px;
+}
+
 .article-card-main {
   display: grid;
   grid-template-columns: 1fr;
@@ -2329,8 +2879,14 @@ async function exportNote() {
   margin: 0 0 4px;
   font-size: 14px;
   line-height: 1.35;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: color-mix(in srgb, currentColor 70%, transparent 30%);
+}
+
+.article-card-title.unread {
+  font-weight: 850;
+  color: color-mix(in srgb, var(--app-text) 94%, var(--theme-accent) 6%);
 }
 
 .article-card-summary {
@@ -2347,6 +2903,31 @@ async function exportNote() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.article-list-load-more,
+.article-list-empty,
+.article-list-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  padding: 12px 0 18px;
+  color: color-mix(in srgb, currentColor 58%, transparent 42%);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.article-list-loading {
+  gap: 8px;
+}
+
+.article-list-loading-icon {
+  animation: summary-icon-spin 0.9s linear infinite;
+}
+
+.article-list-load-more :deep(.el-button) {
+  min-width: 112px;
 }
 
 .article-card-thumb {
@@ -2385,7 +2966,12 @@ async function exportNote() {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-  padding: 18px 24px 24px;
+  padding: 18px clamp(18px, 4vw, 48px) 24px;
+}
+
+.reader-content-frame {
+  width: min(100%, 760px);
+  margin: 0 auto;
 }
 
 :global(body.theme-dark) .reader-detail-panel {
@@ -2395,38 +2981,42 @@ async function exportNote() {
 .detail-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
   flex-shrink: 0;
-  padding: 18px 24px 0;
-  margin-bottom: 0;
+  width: min(100%, 760px);
+  padding: 16px 0 0;
+  margin: 0 auto;
+  justify-content: flex-end;
 }
 
 .toolbar-icon-button {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
   padding: 0;
-  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 18%, var(--app-surface) 82%);
-  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 24%, var(--app-border) 76%);
-  --el-button-text-color: color-mix(in srgb, currentColor 88%, #435b84 12%);
-  --el-button-hover-bg-color: color-mix(in srgb, var(--theme-accent) 28%, var(--app-surface-strong) 72%);
-  --el-button-hover-border-color: color-mix(in srgb, var(--theme-accent) 42%, var(--app-border) 58%);
-  --el-button-hover-text-color: inherit;
+  --el-button-bg-color: color-mix(in srgb, var(--app-surface-strong) 72%, transparent 28%);
+  --el-button-border-color: color-mix(in srgb, var(--app-border) 72%, transparent 28%);
+  --el-button-text-color: color-mix(in srgb, currentColor 58%, transparent 42%);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--theme-accent) 12%, var(--app-surface) 88%);
+  --el-button-hover-border-color: color-mix(in srgb, var(--theme-accent) 34%, var(--app-border) 66%);
+  --el-button-hover-text-color: color-mix(in srgb, var(--theme-accent) 82%, currentColor 18%);
+  --el-button-active-bg-color: color-mix(in srgb, var(--theme-accent) 16%, var(--app-surface) 84%);
+  box-shadow: none;
+}
+
+.toolbar-icon-button :deep(.el-icon) {
+  font-size: 15px;
 }
 
 :deep(.toolbar-icon-button.active) {
-  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 24%, var(--app-surface) 76%);
-  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 46%, var(--app-border) 54%);
+  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 13%, var(--app-surface) 87%);
+  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--app-border) 62%);
   --el-button-text-color: color-mix(in srgb, var(--theme-accent) 82%, currentColor 18%);
 }
 
 .export-trigger {
-  --el-button-bg-color: color-mix(in srgb, var(--theme-accent) 18%, var(--app-surface) 82%);
-  --el-button-border-color: color-mix(in srgb, var(--theme-accent) 24%, var(--app-border) 76%);
-  --el-button-text-color: color-mix(in srgb, currentColor 88%, #435b84 12%);
-  --el-button-hover-bg-color: color-mix(in srgb, var(--theme-accent) 28%, var(--app-surface-strong) 72%);
-  --el-button-hover-border-color: color-mix(in srgb, var(--theme-accent) 42%, var(--app-border) 58%);
+  margin-left: 4px;
 }
 
 .note-toolbar-button {
@@ -2436,10 +3026,10 @@ async function exportNote() {
 .note-toolbar-button.has-note::after {
   content: '';
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 8px;
-  height: 8px;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
   border: 2px solid var(--app-surface);
   border-radius: 999px;
   background: var(--theme-accent);
@@ -2450,23 +3040,31 @@ async function exportNote() {
   gap: 10px;
 }
 
+.tag-search-input {
+  width: 100%;
+}
+
 .tag-selection-list {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
   max-height: 220px;
   overflow: auto;
+  padding: 2px 2px 4px;
 }
 
 .tag-selection-item {
-  width: 100%;
+  max-width: 100%;
   border: 0;
-  border-radius: 14px;
-  padding: 14px 16px;
+  border-radius: 999px;
+  padding: 7px 8px 7px 10px;
   background: color-mix(in srgb, var(--app-surface-strong) 90%, var(--app-bg) 10%);
   color: inherit;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 7px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -2478,7 +3076,36 @@ async function exportNote() {
 .tag-selection-main {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.tag-selection-main span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-selection-actions {
+  gap: 4px;
+}
+
+.tag-selection-actions .tag-delete-action {
+  width: 20px;
+  height: 20px;
+}
+
+.tag-selection-empty {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--app-surface-strong) 78%, var(--app-bg) 22%);
+  color: color-mix(in srgb, currentColor 48%, transparent 52%);
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -2660,7 +3287,7 @@ async function exportNote() {
 }
 
 .feed-manager-overlay {
-  grid-column: 2 / 4;
+  grid-column: 3 / 6;
   grid-row: 1;
   align-self: stretch;
   height: 100%;
@@ -3050,7 +3677,7 @@ async function exportNote() {
   }
 
   .feed-manager-overlay {
-    grid-column: 1;
+    grid-column: 1 / -1;
   }
 }
 </style>

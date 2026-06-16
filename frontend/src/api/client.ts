@@ -54,6 +54,24 @@ export interface Article {
   created_at: string
 }
 
+export type ArticleListItem = Omit<Article, 'raw_html' | 'cleaned_html' | 'cleaned_markdown'>
+
+export interface PaginatedArticles {
+  items: ArticleListItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface ArticleCounts {
+  total: number
+  unread: number
+  starred: number
+  by_feed: Record<number, number>
+  by_tag: Record<number, number>
+}
+
 export interface Tag {
   id: number
   name: string
@@ -193,6 +211,20 @@ export interface FeedSyncReport {
   results: FeedSyncItem[]
 }
 
+export interface FeedBatchDeleteItem {
+  feed_id: number
+  status: 'success' | 'failed' | 'skipped'
+  message: string
+}
+
+export interface FeedBatchDeleteReport {
+  total: number
+  success: number
+  failed: number
+  skipped: number
+  results: FeedBatchDeleteItem[]
+}
+
 export interface FeedCreateResult {
   status: 'success' | 'partial'
   message: string
@@ -202,9 +234,10 @@ export interface FeedCreateResult {
 export interface OPMLImportItem {
   url?: string | null
   title?: string
-  status: 'imported' | 'partial' | 'skipped' | 'failed'
+  status: 'pending' | 'imported' | 'partial' | 'skipped' | 'failed'
   message: string
   feed?: Feed | null
+  articles?: Article[]
   source_file?: string
 }
 
@@ -216,6 +249,13 @@ export interface OPMLImportReport {
   skipped: number
   failed: number
   results: OPMLImportItem[]
+}
+
+export interface OPMLImportStreamEvent {
+  type: 'parsed' | 'item' | 'done'
+  items?: OPMLImportItem[]
+  item?: OPMLImportItem
+  report: OPMLImportReport
 }
 
 export interface LLMTimeseriesBucket {
@@ -258,6 +298,8 @@ export const rssApi = {
   feeds: () => api.get<Feed[]>('/feeds').then((res) => res.data),
   createFeed: (payload: { title?: string; url: string }) => api.post<FeedCreateResult>('/feeds', payload, { timeout: 60000 }).then((res) => res.data),
   deleteFeed: (id: number) => api.delete<OperationResult>(`/feeds/${id}`).then((res) => res.data),
+  deleteFeeds: (feedIds: number[]) =>
+    api.post<FeedBatchDeleteReport>('/feeds/batch-delete', { feed_ids: feedIds }).then((res) => res.data),
   syncFeed: (id: number) => api.post<Feed>(`/feeds/${id}/sync`, null, { timeout: 60000 }).then((res) => res.data),
   syncAll: () => api.post<FeedSyncReport>('/feeds/sync-all', null, { timeout: 120000 }).then((res) => res.data),
   importOpml: (input: File | File[]) => {
@@ -265,6 +307,12 @@ export const rssApi = {
     const formData = new FormData()
     files.forEach((file) => formData.append('files', file))
     return api.post<OPMLImportReport>('/opml/import', formData, { timeout: 120000 }).then((res) => res.data)
+  },
+  importOpmlStream: (input: File | File[], onEvent: (event: OPMLImportStreamEvent) => void) => {
+    const files = Array.isArray(input) ? input : [input]
+    const formData = new FormData()
+    files.forEach((file) => formData.append('files', file))
+    return streamFormDataSse<OPMLImportStreamEvent>(`${apiBaseUrl}/opml/import/stream`, formData, onEvent)
   },
   exportOpml: (feedIds?: number[]) => {
     const params = new URLSearchParams()
@@ -276,13 +324,15 @@ export const rssApi = {
       })
       .then((res) => res.data)
   },
-  articles: (params?: Record<string, unknown>) => api.get<Article[]>('/articles', { params }).then((res) => res.data),
+  articles: (params?: Record<string, unknown>) => api.get<PaginatedArticles>('/articles', { params }).then((res) => res.data),
+  articleCounts: () => api.get<ArticleCounts>('/articles/counts').then((res) => res.data),
   article: (id: number) => api.get<Article>(`/articles/${id}`).then((res) => res.data),
   refreshArticleContent: (id: number) => api.post<Article>(`/articles/${id}/refresh-content`).then((res) => res.data),
   markRead: (id: number, is_read: boolean) => api.patch<Article>(`/articles/${id}/read`, null, { params: { is_read } }).then((res) => res.data),
   markStarred: (id: number, is_starred: boolean) => api.patch<Article>(`/articles/${id}/star`, null, { params: { is_starred } }).then((res) => res.data),
   tags: () => api.get<Tag[]>('/tags').then((res) => res.data),
   createTag: (payload: { name: string; color: string }) => api.post<Tag>('/tags', payload).then((res) => res.data),
+  deleteTag: (id: number) => api.delete<OperationResult>(`/tags/${id}`).then((res) => res.data),
   setArticleTags: (articleId: number, tagIds: number[]) =>
     api.post<{ article_id: number; tag_ids: number[] }>(`/articles/${articleId}/tags`, tagIds).then((res) => res.data),
   note: (articleId: number) => api.get<Note>(`/articles/${articleId}/note`).then((res) => res.data),
@@ -308,7 +358,8 @@ export const rssApi = {
     api.get('/stats/llm', { params: range ? { range } : {} }).then((res) => res.data),
   llmTimeseries: (range: StatsRange = 'today') =>
     api.get<LLMTimeseriesBucket[]>('/stats/llm/timeseries', { params: { range } }).then((res) => res.data),
-  syncLogs: () => api.get<SyncLog[]>('/logs/sync').then((res) => res.data),
+  syncLogs: (range?: StatsRange) =>
+    api.get<SyncLog[]>('/logs/sync', { params: range ? { range } : {} }).then((res) => res.data),
   search: (q: string, limit = 50) =>
     api.get<SearchResult[]>('/search', { params: { q, limit } }).then((res) => res.data),
   ragAsk: (question: string) =>
@@ -324,6 +375,18 @@ export const rssApi = {
   
 }
 
+async function streamFormDataSse<T>(url: string, formData: FormData, onEvent: (event: T) => void) {
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(await fetchErrorMessage(response))
+  }
+
+  await readSseResponse(response, onEvent)
+}
+
 async function streamSse<T>(url: string, payload: unknown, onEvent: (event: T) => void) {
   const response = await fetch(url, {
     method: 'POST',
@@ -334,7 +397,11 @@ async function streamSse<T>(url: string, payload: unknown, onEvent: (event: T) =
     throw new Error(await fetchErrorMessage(response))
   }
 
-  const reader = response.body.getReader()
+  await readSseResponse(response, onEvent)
+}
+
+async function readSseResponse<T>(response: Response, onEvent: (event: T) => void) {
+  const reader = response.body!.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
 

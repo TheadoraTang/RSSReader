@@ -1,7 +1,23 @@
 from app.repositories import repository
 
 
-def list_articles(feed_id=None, tag_id=None, unread=None, starred=None):
+def list_articles(feed_id=None, tag_id=None, unread=None, starred=None, limit=50, offset=0, sort_order="newest"):
+    return repository.list_article_items(
+        feed_id=feed_id,
+        tag_id=tag_id,
+        unread=unread,
+        starred=starred,
+        limit=limit,
+        offset=offset,
+        sort_order=sort_order,
+    )
+
+
+def article_counts():
+    return repository.article_counts()
+
+
+def list_full_articles(feed_id=None, tag_id=None, unread=None, starred=None):
     return repository.list_articles(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
 
 
