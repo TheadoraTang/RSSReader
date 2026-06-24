@@ -176,25 +176,20 @@ class SQLiteRepository:
         query = query.strip()
         if not query:
             return []
-        # Build a prefix-match query: each token gets a trailing * so "LLM" matches "LLMs", "LLM-based", etc.
-        tokens = query.replace('"', '').split()
-        fts_query = " ".join(f'"{t}"*' for t in tokens if t)
+        pattern = f"%{query}%"
         sql = """
-            SELECT entries.*, feeds.title AS feed_title,
-                   snippet(entries_fts, 0, '<mark>', '</mark>', '...', 24) AS title_snippet,
-                   snippet(entries_fts, 1, '<mark>', '</mark>', '...', 48) AS summary_snippet,
-                   snippet(entries_fts, 2, '<mark>', '</mark>', '...', 48) AS content_snippet,
-                   rank
-            FROM entries_fts
-            JOIN entries ON entries.id = entries_fts.rowid
+            SELECT entries.*, feeds.title AS feed_title
+            FROM entries
             JOIN feeds ON feeds.id = entries.feed_id
-            WHERE entries_fts MATCH ?
-            ORDER BY rank
+            WHERE entries.title LIKE ?
+               OR entries.summary LIKE ?
+               OR entries.cleaned_markdown LIKE ?
+            ORDER BY COALESCE(entries.published_at, entries.created_at) DESC
             LIMIT ?
         """
         with get_connection() as conn:
-            rows = conn.execute(sql, (fts_query, limit)).fetchall()
-        return [self._search_result(row) for row in rows]
+            rows = conn.execute(sql, (pattern, pattern, pattern, limit)).fetchall()
+        return [self._search_result_like(row, query) for row in rows]
 
     def list_article_items(self, feed_id=None, tag_id=None, unread=None, starred=None, limit=50, offset=0, sort_order="newest"):
         conditions, params = self._article_filter_conditions(feed_id=feed_id, tag_id=tag_id, unread=unread, starred=starred)
@@ -990,6 +985,44 @@ class SQLiteRepository:
             "created_at": row["created_at"],
         }
 
+    def _make_snippet(self, text: str, query: str, context: int = 100) -> str | None:
+        if not text:
+            return None
+        idx = text.lower().find(query.lower())
+        if idx == -1:
+            return None
+        start = max(0, idx - context)
+        end = min(len(text), idx + len(query) + context)
+        snippet = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+        # wrap matched term with <mark>
+        import re
+        snippet = re.sub(re.escape(query), f"<mark>{query}</mark>", snippet, flags=re.IGNORECASE)
+        return snippet
+
+    def _search_result_like(self, row, query: str):
+        title = row["title"] or ""
+        summary = row["summary"] or ""
+        content = row["cleaned_markdown"] or ""
+
+        title_snippet = self._make_snippet(title, query, context=40)
+        summary_snippet = None
+        content_snippet = self._make_snippet(content, query, context=100)
+
+        return {
+            "id": row["id"],
+            "feed_id": row["feed_id"],
+            "feed_title": row["feed_title"],
+            "title": title,
+            "url": row["link"] or "",
+            "author": row["author"],
+            "published_at": row["published_at"],
+            "is_read": bool(row["is_read"]),
+            "is_starred": bool(row["is_starred"]),
+            "title_snippet": title_snippet,
+            "summary_snippet": summary_snippet,
+            "content_snippet": content_snippet,
+        }
+
     def _search_result(self, row):
         return {
             "id": row["id"],
@@ -1001,9 +1034,9 @@ class SQLiteRepository:
             "published_at": row["published_at"],
             "is_read": bool(row["is_read"]),
             "is_starred": bool(row["is_starred"]),
-            "title_snippet": row["title_snippet"],
-            "summary_snippet": row["summary_snippet"],
-            "content_snippet": row["content_snippet"],
+            "title_snippet": None,
+            "summary_snippet": None,
+            "content_snippet": None,
         }
 
     def _llm_provider(self, row, include_api_key: bool = False):

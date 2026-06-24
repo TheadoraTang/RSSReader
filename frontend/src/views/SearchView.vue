@@ -44,9 +44,9 @@
           />
 
           <p
-            v-if="item.summary_snippet || item.content_snippet"
+            v-if="item.content_snippet || item.summary_snippet"
             class="result-snippet"
-            v-html="item.summary_snippet || item.content_snippet"
+            v-html="item.content_snippet || item.summary_snippet"
           />
 
           <div class="result-footer">
