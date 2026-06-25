@@ -257,6 +257,7 @@ class SegmentTranslationRequest(BaseModel):
     target_language: str = Field(default="zh", pattern=r"^(zh|en|ja|ko|fr|de|es|pt|ru|ar)$")
     source_language: str = "auto"
     preserve_markdown: bool = True
+    preserve_html: bool = False
 
 
 class SegmentTranslationResponse(BaseModel):

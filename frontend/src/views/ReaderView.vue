@@ -2074,6 +2074,30 @@ function renderMarkdownBlock(block: string): string {
   return `<p>${lines.map((line) => renderMarkdownInline(line)).join('<br />')}</p>`
 }
 
+// 从含图片的 HTML 中提取混合块：图片段单独展示，文本段可翻译
+function parseHtmlBlocks(html: string, markdownFallback?: string): { html: string; text: string; translatable: boolean; isHtml: boolean }[] {
+  // 用 <img> 标签切分 HTML
+  const imgRegex = /(<img[^>]+src="[^"]+"[^>]*\/?>)/gi
+  const segments = html.split(imgRegex)
+  const result: { html: string; text: string; translatable: boolean; isHtml: boolean }[] = []
+  const mdText = markdownFallback || htmlToPlainText(html)
+
+  for (const segment of segments) {
+    if (!segment.trim()) continue
+    if (/^<img[^>]+>/i.test(segment.trim())) {
+      // 图片段：直接渲染，不可翻译
+      result.push({ html: segment.trim(), text: '', translatable: false, isHtml: true })
+    } else {
+      // 文本段：可翻译，保留完整 HTML 原文发送给翻译 agent
+      const plainText = htmlToPlainText(segment)
+      if (!plainText.trim()) continue
+      // 用原始 HTML（保留链接/粗体/排版）作为翻译输入
+      result.push({ html: segment.trim(), text: segment.trim(), translatable: true, isHtml: true })
+    }
+  }
+  return result.length ? result : [{ html, text: mdText, translatable: !!mdText, isHtml: true }]
+}
+
 // 简易 Markdown 块解析：按双换行切块，识别代码块/ hr 不可翻译
 function parseTranslatableBlocks(markdown: string): { text: string; translatable: boolean }[] {
   const normalized = markdown.replace(/\r\n/g, '\n').trim()
@@ -2308,9 +2332,11 @@ function paragraphKey(articleId: number, index: number) {
   return `${articleId}:${index}`
 }
 
-// 渲染单段译文为 HTML
+// 渲染单段译文为 HTML（HTML 保真模式直接返回原文，否则 markdown 转 HTML）
 function renderedParagraphTranslation(text: string): string {
   if (!text) return ''
+  // 译文含 HTML 标签则直接渲染
+  if (looksLikeHtml(text)) return text
   return markdownToHtml(text)
 }
 
@@ -2328,7 +2354,7 @@ async function translateParagraph(articleId: number, index: number, sourceText: 
       text: sourceText,
       target_language: translationLanguage.value,
       source_language: 'auto',
-      preserve_markdown: true,
+      preserve_html: true,
     })
     paragraphTranslations.value = {
       ...paragraphTranslations.value,
