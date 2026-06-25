@@ -268,6 +268,7 @@ def translate_segment(
     target_language: str = "zh",
     source_language: str = "auto",
     preserve_markdown: bool = True,
+    preserve_html: bool = False,
 ) -> dict:
     """Translate a single text segment (per-paragraph translate button).
 
@@ -290,6 +291,7 @@ def translate_segment(
             target_language=target_language,
             source_language=source_language,
             preserve_markdown=preserve_markdown,
+            preserve_html=preserve_html,
         ),
     )
     return {

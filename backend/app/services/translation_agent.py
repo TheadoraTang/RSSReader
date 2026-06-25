@@ -118,6 +118,7 @@ class TranslationOptions:
     target_language: str = "zh"
     source_language: str = "auto"
     preserve_markdown: bool = True
+    preserve_html: bool = False
     context_window_tokens: int = 6000
     chunk_token_budget: int = 2600
     chunk_overlap_tokens: int = 0  # Translation uses sentence-aligned, no overlap needed
@@ -1151,9 +1152,13 @@ def translate_segment_with_provider(
     source = _language_display(options.source_language)
 
     preserve_instruction = (
-        "保留原文行内的所有 Markdown 符号（**、`、[]()、标点风格）。"
-        if options.preserve_markdown
-        else "输出自然流畅的纯文本译文。"
+        "**关键：保留原文的所有 HTML 标签（<a>, <strong>, <em>, <p>, <ul> 等），仅翻译可见文字内容，不改动标签属性、URL 和图片。**"
+        if options.preserve_html
+        else (
+            "保留原文行内的所有 Markdown 符号（**、`、[]()、标点风格）。"
+            if options.preserve_markdown
+            else "输出自然流畅的纯文本译文。"
+        )
     )
     system_prompt = (
         "你是 RSSReader 的翻译智能体。你只翻译用户提供的文本片段，"

@@ -430,6 +430,14 @@ body.theme-dark .article-list-panel::-webkit-scrollbar-corner {
   height: auto;
   margin: 1.25rem auto;
   border-radius: 14px;
+  min-height: 120px;
+  background: color-mix(in srgb, var(--app-border) 20%, var(--app-surface) 80%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.article-body img[src] {
+  opacity: 1;
 }
 
 .article-body img.image-load-failed {

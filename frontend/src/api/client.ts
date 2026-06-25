@@ -132,6 +132,7 @@ export interface SegmentTranslationPayload {
   target_language?: string
   source_language?: string
   preserve_markdown?: boolean
+  preserve_html?: boolean
 }
 
 export interface SegmentTranslationResponse {

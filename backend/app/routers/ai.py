@@ -146,6 +146,7 @@ def translate_segment(payload: SegmentTranslationRequest):
             target_language=payload.target_language,
             source_language=payload.source_language,
             preserve_markdown=payload.preserve_markdown,
+            preserve_html=payload.preserve_html,
         )
     except TranslationAgentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
