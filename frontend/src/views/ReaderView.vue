@@ -943,11 +943,19 @@ const articleRenderedBlocks = computed(() => {
   if (!article) return [] as { html: string; text: string; translatable: boolean; isHtml: boolean }[]
   const primaryContent = article.cleaned_html?.trim() || article.raw_html?.trim() || ''
   const hasImages = /<img[^>]+src=/i.test(primaryContent)
-  // 原始 HTML 内容有图片或非 markdown：无法可靠分块，退化为单块整体渲染
-  if (primaryContent && (!article.cleaned_markdown?.trim() || hasImages)) {
+
+  // 有图片的 HTML：从 HTML 中提取文本段和图片段混合排列
+  if (primaryContent && hasImages) {
+    return parseHtmlBlocks(primaryContent, article.cleaned_markdown?.trim())
+  }
+
+  // 无图片 HTML：没有 markdown 时退化为单块
+  if (primaryContent && !article.cleaned_markdown?.trim()) {
     const text = htmlToPlainText(primaryContent) || article.summary?.trim() || ''
     return [{ html: primaryContent, text, translatable: !!text, isHtml: true }]
   }
+
+  // markdown 路径
   const md = article.cleaned_markdown?.trim() || article.summary?.trim() || ''
   if (!md) return [{ html: '<p>这篇文章暂时没有可展示的正文内容。</p>', text: '', translatable: false, isHtml: false }]
   const normalized = md.replace(/\r\n/g, '\n').trim()
