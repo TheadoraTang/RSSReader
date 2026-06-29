@@ -29,6 +29,8 @@ const result = spawnSync(
     'pydantic',
     '--collect-all',
     'pydantic_core',
+    '--collect-all',
+    'sqlite_vec',
     '--hidden-import',
     'backports.tarfile',
     '--exclude-module',
