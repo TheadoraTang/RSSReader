@@ -662,3 +662,10 @@
 - 使用 AI Coding Agent 整理仓库顶层结构，将课程过程材料、需求截图、AI 编码案例 PDF、团队协作文档、PR 模板和参考 agent 配置统一归档到 `docs/coursework/`。
 - 新增 `docs/coursework/README.md` 作为归档目录索引，并修正 `docs/REQUIREMENTS.md`、`docs/PROJECT_OVERVIEW.md`、`README.md`、`README_CN.md` 中相关文档入口和链接。
 - 本次仅整理文档与资源位置，未改动前后端运行逻辑；现有已跟踪的 `__pycache__` 和 `frontend/dist` 等生成产物仍建议在单独清理 PR 中处理。
+
+## 2026-06-29
+
+- Used AI Coding Agent to diagnose why RAG indexing worked in `npm run dev:desktop` but failed in the installed Windows app.
+- Found that the packaged backend is a PyInstaller build, while development mode runs the source backend from the local virtual environment.
+- Updated the backend packaging configuration to collect `sqlite_vec`, including its dynamic SQLite extension files, so RAG vector indexing can load the required module in the installed app.
+- Remaining limitation: the installer must be rebuilt and installed again for this packaging fix to take effect.
