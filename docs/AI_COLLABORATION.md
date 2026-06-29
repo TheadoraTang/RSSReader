@@ -656,3 +656,9 @@
 - 新增摘要交互状态，应用自动加载缓存摘要时不再显示“摘要内容展示不完全，请重新生成”警告。
 - 用户主动打开摘要抽屉或点击生成摘要后，摘要失败和内容不完整提示仍按原逻辑展示。
 - 前端 `npm.cmd run build` 验证通过，构建产物已恢复，未纳入本次源码改动。
+
+## 2026-06-29（仓库文档与课程材料整理）
+
+- 使用 AI Coding Agent 整理仓库顶层结构，将课程过程材料、需求截图、AI 编码案例 PDF、团队协作文档、PR 模板和参考 agent 配置统一归档到 `docs/coursework/`。
+- 新增 `docs/coursework/README.md` 作为归档目录索引，并修正 `docs/REQUIREMENTS.md`、`docs/PROJECT_OVERVIEW.md`、`README.md`、`README_CN.md` 中相关文档入口和链接。
+- 本次仅整理文档与资源位置，未改动前后端运行逻辑；现有已跟踪的 `__pycache__` 和 `frontend/dist` 等生成产物仍建议在单独清理 PR 中处理。

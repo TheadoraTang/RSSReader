@@ -31,7 +31,7 @@
 2. 有任何问题同时在微信群和issues中提出，因为要体现**开源协作**
 3. 貌似是每周都要汇报的，每周负责报告的人就是这周负责开发功能的人（1-2个）
 4. 提交PR的时候要稍微详细一点，不要只写"update XXX文件"之类的,可以参考template中的要求
-5. 如果你想提交修改的代码，根据 [CONTRIBUTING.md](CONTRIBUTING.md) 的要求，标准流程如下:[提交流程](template_CN.md)
+5. 如果你想提交修改的代码，根据 [CONTRIBUTING.md](../../CONTRIBUTING.md) 的要求，标准流程如下:[提交流程](template_CN.md)
 
 
 

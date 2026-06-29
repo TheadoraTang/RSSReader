@@ -1,6 +1,6 @@
 # 需求对照
 
-本项目根据 `demand.png` 中的 Mercury Features 和 Technical Constraints 设计。
+本项目根据 [`coursework/demand.png`](coursework/demand.png) 中的 Mercury Features 和 Technical Constraints 设计。
 
 ## 功能要求
 

@@ -122,7 +122,7 @@ RSSReader/
 
 关键设计原则：
 - **Router 不直接操作数据库**，通过 Service 调用 Repository
-- **Repository 可替换**：当前使用 [`SQLiteRepository`](backend/app/repositories/sqlite_repository.py:432)，之前的设计是 Mock-first（见 [`PLAN.md`](PLAN.md:53)）
+- **Repository 可替换**：当前使用 [`SQLiteRepository`](../backend/app/repositories/sqlite_repository.py:432)，之前的设计是 Mock-first（见 [`PLAN.md`](coursework/PLAN.md:53)）
 - **Service 层复用 Repository 接口**，切换数据库无需修改业务逻辑
 
 ### 4.2 前后端通信
